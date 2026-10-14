@@ -5,6 +5,8 @@ import os
 import pickle
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import networkx as nx
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -187,7 +189,6 @@ def visualizar_grafo(G: nx.MultiDiGraph, ruta_png: Optional[str] = None, max_eti
         os.makedirs(os.path.dirname(ruta_png) or ".", exist_ok=True)
         plt.savefig(ruta_png, dpi=130)
         log.info("Grafo guardado en %s", ruta_png)
-    plt.show()
     plt.close()
     return ruta_png
 

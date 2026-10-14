@@ -5,7 +5,13 @@ Anthropic (ANTHROPIC_API_KEY o un perfil de `ant auth login`).
 """
 from __future__ import annotations
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 
 def _env_effort(nombre: str, defecto: str) -> str:
@@ -51,6 +57,15 @@ class Config:
 
 
 CFG = Config()
+
+
+def actualizar_config(**cambios) -> None:
+    """Modifica CFG en sitio (todos los módulos comparten la misma instancia)."""
+    validos = {f.name for f in fields(Config)}
+    for k, v in cambios.items():
+        if k not in validos:
+            raise KeyError(f"Campo de configuración desconocido: {k}")
+        object.__setattr__(CFG, k, v)
 
 
 # Constantes de schema del grafo (no son configurables — son parte del contrato del modelo)

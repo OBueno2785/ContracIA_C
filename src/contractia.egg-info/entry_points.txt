@@ -1,0 +1,2 @@
+[console_scripts]
+contractia = contractia.__main__:run

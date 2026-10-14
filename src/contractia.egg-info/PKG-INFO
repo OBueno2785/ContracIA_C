@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: contractia
+Version: 0.3.0
+Summary: Auditoría contractual multi-agente con GraphRAG sobre la API de Claude
+Requires-Python: >=3.10
+Requires-Dist: anthropic>=1.14
+Requires-Dist: pydantic>=2
+Requires-Dist: networkx>=3
+Requires-Dist: tenacity>=8
+Requires-Dist: tqdm>=4
+Requires-Dist: matplotlib>=3.8
+Requires-Dist: pypdf>=4
+Requires-Dist: python-docx>=1.1
+Requires-Dist: python-dotenv>=1
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"

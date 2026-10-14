@@ -33,14 +33,6 @@ def _save_report(md_text: str, filename: Optional[str] = None) -> None:
         log.warning("No se pudo guardar el informe: %s", e)
 
 
-def _mostrar(md: str) -> None:
-    try:
-        from IPython.display import display, Markdown
-        display(Markdown(md))
-    except Exception:
-        print(md)
-
-
 def main(chat: bool = True) -> None:
     setup_logger()
 
@@ -82,7 +74,6 @@ def main(chat: bool = True) -> None:
             )
         md += f"\n\n---\n*Modelo: {CFG.modelo} · Tiempo de ejecución: {elapsed:.2f}s*\n\n"
         md += f"## Uso de Tokens\n\n{llm.tokens.resumen()}\n"
-        _mostrar(md)
     except Exception as e:
         log.warning("Error renderizando informe: %s", e)
         md = "Sin datos."
