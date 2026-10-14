@@ -1,0 +1,14 @@
+*.json
+*.pdf
+*.docx
+*.ipynb_checkpoints/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+cache/
+informe_auditoria_contrato.md
+logs/
+*.log
+contrato_nuevo/

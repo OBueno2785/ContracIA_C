@@ -1,0 +1,8 @@
+anthropic>=1.14
+pydantic>=2
+networkx>=3
+tenacity>=8
+tqdm>=4
+matplotlib>=3.8
+pypdf>=4
+python-docx>=1.1
