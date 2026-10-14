@@ -1,6 +1,6 @@
 """Schemas Pydantic para structured output (P1 4.2)."""
 from __future__ import annotations
-from typing import List
+
 from pydantic import BaseModel, Field
 
 
@@ -15,19 +15,19 @@ class Hallazgo(BaseModel):
 
 class RespuestaJurista(BaseModel):
     hay_inconsistencias: bool = False
-    hallazgos: List[Hallazgo] = Field(default_factory=list)
+    hallazgos: list[Hallazgo] = Field(default_factory=list)
 
 
 class RespuestaAuditor(BaseModel):
     hay_inconsistencias: bool = False
-    hallazgos: List[Hallazgo] = Field(default_factory=list)
+    hallazgos: list[Hallazgo] = Field(default_factory=list)
 
 
 class RespuestaCronista(BaseModel):
     hay_procedimientos: bool = False
     hay_errores_logicos: bool = False
     hay_inconsistencia_plazos: bool = False
-    hallazgos_procesos: List[Hallazgo] = Field(default_factory=list)
+    hallazgos_procesos: list[Hallazgo] = Field(default_factory=list)
 
 
 # ----- Seguridad -----
@@ -47,4 +47,4 @@ class TripletaGrafo(BaseModel):
 
 
 class RespuestaExtraccion(BaseModel):
-    tripletas: List[TripletaGrafo] = Field(default_factory=list)
+    tripletas: list[TripletaGrafo] = Field(default_factory=list)

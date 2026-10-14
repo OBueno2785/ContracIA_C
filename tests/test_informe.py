@@ -1,8 +1,7 @@
 """Tests para informe.py: deduplicar_hallazgos, dashboard_severidades, render_auditoria_markdown."""
-import pytest
 from contractia.informe import (
-    deduplicar_hallazgos,
     dashboard_severidades,
+    deduplicar_hallazgos,
     render_auditoria_markdown,
 )
 

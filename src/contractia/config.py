@@ -4,6 +4,7 @@ Lee env vars con fallbacks razonables. La autenticación la resuelve el SDK de
 Anthropic (ANTHROPIC_API_KEY o un perfil de `ant auth login`).
 """
 from __future__ import annotations
+
 import os
 from dataclasses import dataclass, field, fields
 

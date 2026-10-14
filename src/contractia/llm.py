@@ -1,9 +1,11 @@
 """Cliente Claude: salida estructurada async, caché de prompts, effort por etapa y conteo de tokens."""
 from __future__ import annotations
+
 import asyncio
 import threading
+from collections.abc import Iterator
 from contextlib import asynccontextmanager
-from typing import Any, Iterator, Optional, Type, TypeVar
+from typing import Any, TypeVar
 
 import anthropic
 from pydantic import BaseModel
@@ -34,7 +36,7 @@ def ejecutar(coro):
     def _run():
         try:
             resultado["valor"] = asyncio.run(coro)
-        except BaseException as e:
+        except BaseException as e:  # noqa: BLE001
             resultado["error"] = e
 
     hilo = threading.Thread(target=_run)
@@ -45,7 +47,7 @@ def ejecutar(coro):
     return resultado["valor"]
 
 
-def bloques_system(instrucciones: str, referencia: Optional[str] = None) -> list:
+def bloques_system(instrucciones: str, referencia: str | None = None) -> list:
     # La referencia (contrato completo) va primero para que su caché se comparta entre agentes.
     bloques = []
     if referencia:
@@ -55,11 +57,11 @@ def bloques_system(instrucciones: str, referencia: Optional[str] = None) -> list
 
 
 class ClienteClaude:
-    def __init__(self, modelo: Optional[str] = None):
+    def __init__(self, modelo: str | None = None):
         self.modelo = modelo or CFG.modelo
         self.tokens = ContadorTokens()
-        self._async: Optional[anthropic.AsyncAnthropic] = None
-        self._sync: Optional[anthropic.Anthropic] = None
+        self._async: anthropic.AsyncAnthropic | None = None
+        self._sync: anthropic.Anthropic | None = None
 
     def _kwargs(self, etapa: str) -> dict:
         kw: dict = {
@@ -89,8 +91,8 @@ class ClienteClaude:
         etapa: str,
         instrucciones: str,
         contenido: str,
-        schema: Type[T],
-        referencia: Optional[str] = None,
+        schema: type[T],
+        referencia: str | None = None,
     ) -> T:
         if self._async is None:
             raise RuntimeError("Usa `async with cliente.sesion():` antes de llamar al modelo.")

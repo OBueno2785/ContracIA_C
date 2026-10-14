@@ -1,30 +1,36 @@
 """Pipeline de auditoría multi-agente con seguridad y checkpoint (celdas 5–6)."""
 from __future__ import annotations
+
 import asyncio
 import json
 import os
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Type
 
 import networkx as nx
 from pydantic import BaseModel
 from tqdm.auto import tqdm
 
 from .config import CFG
+from .grafo import (
+    construir_grafo_conocimiento,
+    construir_indice_nodos_por_cid,
+    obtener_contexto_grafo,
+    visualizar_grafo,
+)
 from .llm import ClienteClaude, ejecutar
 from .logging_setup import get_logger
 from .models import (
-    RespuestaJurista, RespuestaAuditor,
-    RespuestaCronista, RespuestaSeguridad,
+    RespuestaAuditor,
+    RespuestaCronista,
+    RespuestaJurista,
+    RespuestaSeguridad,
 )
 from .segmentacion import (
-    separar_en_secciones, crear_indice_capitulos_anexos,
-    crear_indice_global_clausulas, crear_indice_de_clausulas_por_seccion,
     construir_mapa_clausula_a_seccion,
-)
-from .grafo import (
-    construir_grafo_conocimiento, construir_indice_nodos_por_cid,
-    visualizar_grafo, obtener_contexto_grafo,
+    crear_indice_capitulos_anexos,
+    crear_indice_de_clausulas_por_seccion,
+    crear_indice_global_clausulas,
+    separar_en_secciones,
 )
 from .utils import hash_secciones, path_checkpoint_hallazgos
 
@@ -34,18 +40,18 @@ log = get_logger("auditoria")
 class AgenteEspecialista:
     """Instrucciones fijas en el prompt de sistema (cacheado); datos de cada sección en el mensaje."""
 
-    def __init__(self, llm: ClienteClaude, instrucciones: str, schema: Type[BaseModel], etiqueta: str):
+    def __init__(self, llm: ClienteClaude, instrucciones: str, schema: type[BaseModel], etiqueta: str):
         self.llm = llm
         self.instrucciones = instrucciones
         self.schema = schema
         self.etiqueta = etiqueta
 
-    async def aejecutar(self, contenido: str, referencia: Optional[str] = None):
+    async def aejecutar(self, contenido: str, referencia: str | None = None):
         try:
             return await self.llm.estructurado(
                 self.etiqueta, self.instrucciones, contenido, self.schema, referencia
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.warning("Error en agente '%s': %s", self.etiqueta, e)
             return self.schema()
 
@@ -58,7 +64,7 @@ _REGLA_REFERENCIA = (
 
 def _crear_agentes(
     llm: ClienteClaude, idx_glob: str
-) -> Tuple[AgenteEspecialista, AgenteEspecialista, AgenteEspecialista]:
+) -> tuple[AgenteEspecialista, AgenteEspecialista, AgenteEspecialista]:
     instr_jurista = (
         "# SISTEMA\n"
         "Motor automatizado de validación de lógica procedimental y operativa de contratos.\n\n"
@@ -123,8 +129,8 @@ async def auditar_consistencia_async(
     jurista: AgenteEspecialista,
     auditor: AgenteEspecialista,
     cronista: AgenteEspecialista,
-    referencia: Optional[str] = None,
-) -> List[Dict]:
+    referencia: str | None = None,
+) -> list[dict]:
     if not CFG.enable_llm:
         return []
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
@@ -140,7 +146,7 @@ async def auditar_consistencia_async(
         cronista.aejecutar(contenido, referencia),
     )
 
-    hallazgos: List[Dict] = []
+    hallazgos: list[dict] = []
     if isinstance(res_juri, RespuestaJurista) and res_juri.hay_inconsistencias:
         hallazgos.extend([h.model_dump() for h in res_juri.hallazgos])
     if isinstance(res_aud, RespuestaAuditor) and res_aud.hay_inconsistencias:
@@ -164,7 +170,7 @@ INSTRUCCIONES_SEGURIDAD = (
 )
 
 
-async def _verificar_seguridad_async(secciones: List[Dict], llm: ClienteClaude) -> Tuple[bool, str]:
+async def _verificar_seguridad_async(secciones: list[dict], llm: ClienteClaude) -> tuple[bool, str]:
     semaforo = asyncio.Semaphore(CFG.max_concurrencia_grafo)
 
     async def procesar(sec):
@@ -178,7 +184,7 @@ async def _verificar_seguridad_async(secciones: List[Dict], llm: ClienteClaude) 
                     f"<documento>\n{contenido}\n</documento>", RespuestaSeguridad,
                 )
                 return (resp.es_seguro, sec.get("titulo", "?"), resp.evidencia)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 return (False, sec.get("titulo", "?"), f"Error en escaneo (fail-closed): {e}")
 
     async with llm.sesion():
@@ -198,16 +204,16 @@ async def _verificar_seguridad_async(secciones: List[Dict], llm: ClienteClaude) 
             await asyncio.gather(*tareas, return_exceptions=True)
 
 
-def verificar_seguridad_documento(secciones: List[Dict], llm: ClienteClaude) -> Tuple[bool, str]:
+def verificar_seguridad_documento(secciones: list[dict], llm: ClienteClaude) -> tuple[bool, str]:
     log.info("Iniciando escaneo de seguridad (Detección de Prompt Injection)...")
     return ejecutar(_verificar_seguridad_async(secciones, llm))
 
 
 # --- Checkpoint JSONL (auditoría resumible) ---
-def _cargar_checkpoint(path: str) -> Dict[str, Dict]:
+def _cargar_checkpoint(path: str) -> dict[str, dict]:
     if not os.path.exists(path):
         return {}
-    out: Dict[str, Dict] = {}
+    out: dict[str, dict] = {}
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -216,28 +222,28 @@ def _cargar_checkpoint(path: str) -> Dict[str, Dict]:
             try:
                 reg = json.loads(line)
                 out[reg["seccion"]] = reg
-            except Exception:
+            except (json.JSONDecodeError, KeyError, TypeError):
                 continue
     return out
 
 
-def _appendear_checkpoint(path: str, registro: Dict) -> None:
+def _appendear_checkpoint(path: str, registro: dict) -> None:
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(registro, ensure_ascii=False) + "\n")
 
 
 # --- Auditoría async por sección ---
 async def _auditar_seccion_async(
-    sec: Dict,
+    sec: dict,
     grafo_contrato: nx.MultiDiGraph,
-    indice_nodos_grafo: Dict[str, List[str]],
-    mapa_clausula_a_seccion: Dict[str, Dict],
+    indice_nodos_grafo: dict[str, list[str]],
+    mapa_clausula_a_seccion: dict[str, dict],
     jurista: AgenteEspecialista,
     auditor_ag: AgenteEspecialista,
     cronista: AgenteEspecialista,
     semaforo: asyncio.Semaphore,
-    referencia: Optional[str] = None,
-) -> Optional[Dict]:
+    referencia: str | None = None,
+) -> dict | None:
     contenido = sec.get("contenido", "")
     titulo = sec.get("titulo", "Sección")
     idx_local = crear_indice_de_clausulas_por_seccion(contenido)
@@ -255,7 +261,7 @@ async def _auditar_seccion_async(
                 cronista=cronista,
                 referencia=referencia,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.warning("Error en sección '%s': %s", titulo, e)
             hallazgos = []
 
@@ -265,14 +271,14 @@ async def _auditar_seccion_async(
 async def _auditar_todas_async(
     secciones, grafo_contrato, indice_nodos_grafo, mapa_clausula_a_seccion,
     llm, jurista, auditor_ag, cronista, checkpoint_path, referencia=None,
-) -> List[Dict]:
+) -> list[dict]:
     cache_existente = _cargar_checkpoint(checkpoint_path)
     if cache_existente:
         log.info("Reanudando desde checkpoint: %d secciones ya procesadas.", len(cache_existente))
 
     semaforo = asyncio.Semaphore(CFG.max_concurrencia_auditoria)
     pendientes = [s for s in secciones if s.get("titulo", "Sección") not in cache_existente]
-    resultados: List[Dict] = list(cache_existente.values())
+    resultados: list[dict] = list(cache_existente.values())
 
     if not pendientes:
         return resultados
@@ -298,7 +304,7 @@ async def _auditar_todas_async(
     return resultados
 
 
-def _referencia_contrato(secciones: List[Dict]) -> str:
+def _referencia_contrato(secciones: list[dict]) -> str:
     cuerpo = "\n\n".join(f"=== {s.get('titulo', '')} ===\n{s.get('contenido', '')}" for s in secciones)
     return f"<contrato_completo>\n{cuerpo}\n</contrato_completo>"
 
@@ -306,9 +312,9 @@ def _referencia_contrato(secciones: List[Dict]) -> str:
 def ejecutar_auditoria_contrato(
     texto_contrato: str,
     llm: ClienteClaude,
-    cache_dir: Optional[str] = None,
-    usar_cache: Optional[bool] = None,
-) -> Dict:
+    cache_dir: str | None = None,
+    usar_cache: bool | None = None,
+) -> dict:
     cache_dir = cache_dir or CFG.cache_dir
     if usar_cache is None:
         usar_cache = CFG.usar_cache
@@ -339,7 +345,7 @@ def ejecutar_auditoria_contrato(
         ruta_grafo_png = visualizar_grafo(
             grafo_contrato, os.path.join(cache_dir, f"grafo_{hash_secciones(secciones)}.png")
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log.warning("No se pudo visualizar el grafo: %s", e)
 
     str_idx_glob = (

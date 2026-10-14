@@ -1,11 +1,12 @@
 """Construcción del grafo de conocimiento (P0 + P1)."""
 from __future__ import annotations
+
 import asyncio
 import os
 import pickle
-from typing import Any, Dict, List, Optional, Set, Tuple
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -41,7 +42,7 @@ async def _extraer_con_retry(llm: ClienteClaude, contenido: str) -> RespuestaExt
     return await llm.estructurado("grafo", INSTRUCCIONES_EXTRACCION, contenido, RespuestaExtraccion)
 
 
-def _seccion_contenedora(sec: Dict) -> str:
+def _seccion_contenedora(sec: dict) -> str:
     titulo_seccion = sec.get("titulo", "Sección Desconocida")
     tipo_seccion = sec.get("tipo", "DESCONOCIDO")
     if tipo_seccion == "CAPITULO":
@@ -52,10 +53,10 @@ def _seccion_contenedora(sec: Dict) -> str:
 
 
 async def _procesar_seccion_grafo(
-    sec: Dict,
+    sec: dict,
     llm: ClienteClaude,
     semaforo: asyncio.Semaphore,
-) -> Tuple[str, str, str, List[TripletaGrafo]]:
+) -> tuple[str, str, str, list[TripletaGrafo]]:
     titulo_seccion = sec.get("titulo", "Sección Desconocida")
     tipo_seccion = sec.get("tipo", "DESCONOCIDO")
     contenedora = _seccion_contenedora(sec)
@@ -68,16 +69,16 @@ async def _procesar_seccion_grafo(
         try:
             resp = await _extraer_con_retry(llm, contenido)
             tripletas = resp.tripletas
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.warning("Error extrayendo grafo en sección %s: %s", titulo_seccion, e)
             tripletas = []
     return titulo_seccion, tipo_seccion, contenedora, tripletas
 
 
 async def _construir_grafo_async(
-    secciones: List[Dict],
+    secciones: list[dict],
     llm: ClienteClaude,
-    mapa_clausula_a_seccion: Dict[str, Dict],
+    mapa_clausula_a_seccion: dict[str, dict],
 ) -> nx.MultiDiGraph:
     semaforo = asyncio.Semaphore(CFG.max_concurrencia_grafo)
 
@@ -115,11 +116,11 @@ async def _construir_grafo_async(
 
 
 def construir_grafo_conocimiento(
-    secciones: List[Dict],
+    secciones: list[dict],
     llm: ClienteClaude,
-    mapa_clausula_a_seccion: Dict[str, Dict],
-    cache_dir: Optional[str] = None,
-    usar_cache: Optional[bool] = None,
+    mapa_clausula_a_seccion: dict[str, dict],
+    cache_dir: str | None = None,
+    usar_cache: bool | None = None,
 ) -> nx.MultiDiGraph:
     cache_dir = cache_dir or CFG.cache_dir
     if usar_cache is None: usar_cache = CFG.usar_cache
@@ -132,7 +133,7 @@ def construir_grafo_conocimiento(
                 G = pickle.load(f)
             log.info("Grafo cargado desde cache: %s (%d nodos / %d aristas)", cache_path, G.number_of_nodes(), G.number_of_edges())
             return G
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.warning("Cache de grafo corrupto, reconstruyendo: %s", e)
 
     G = ejecutar(_construir_grafo_async(secciones, llm, mapa_clausula_a_seccion))
@@ -143,14 +144,14 @@ def construir_grafo_conocimiento(
         with open(cache_path, "wb") as f:
             pickle.dump(G, f)
         log.info("Grafo persistido en %s", cache_path)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log.warning("No se pudo persistir el grafo: %s", e)
 
     return G
 
 
-def construir_indice_nodos_por_cid(G: nx.MultiDiGraph) -> Dict[str, List[str]]:
-    indice: Dict[str, List[str]] = {}
+def construir_indice_nodos_por_cid(G: nx.MultiDiGraph) -> dict[str, list[str]]:
+    indice: dict[str, list[str]] = {}
     for n in G.nodes():
         cid = extraer_cid_de_string(str(n))
         if cid:
@@ -164,7 +165,7 @@ _COLORES_TIPO = {
 }
 
 
-def visualizar_grafo(G: nx.MultiDiGraph, ruta_png: Optional[str] = None, max_etiquetas: int = 40) -> Optional[str]:
+def visualizar_grafo(G: nx.MultiDiGraph, ruta_png: str | None = None, max_etiquetas: int = 40) -> str | None:
     """Color por tipo, tamaño por degree y etiquetas solo en los nodos más conectados."""
     if G.number_of_nodes() == 0:
         return None
@@ -194,25 +195,25 @@ def visualizar_grafo(G: nx.MultiDiGraph, ruta_png: Optional[str] = None, max_eti
 
 
 def obtener_contexto_grafo(
-    clausulas_locales: List[str],
+    clausulas_locales: list[str],
     G: nx.MultiDiGraph,
-    mapa_textos: Dict[str, Dict],
-    indice_nodos: Dict[str, List[str]],
+    mapa_textos: dict[str, dict],
+    indice_nodos: dict[str, list[str]],
     profundidad: int = 2,
 ) -> str:
-    contexto: List[str] = []
-    aristas_emitidas: Set[Tuple[str, str, str]] = set()
-    textos_emitidos: Set[str] = set()
+    contexto: list[str] = []
+    aristas_emitidas: set[tuple[str, str, str]] = set()
+    textos_emitidos: set[str] = set()
 
     G_und = G.to_undirected(as_view=True)
 
-    seeds: Set[str] = set()
+    seeds: set[str] = set()
     for cid in clausulas_locales:
         for nodo in indice_nodos.get(cid, []):
             if nodo in G:
                 seeds.add(nodo)
 
-    nodos_relevantes: Set[str] = set()
+    nodos_relevantes: set[str] = set()
     for seed in seeds:
         try:
             ego = nx.ego_graph(G_und, seed, radius=profundidad, undirected=True)
@@ -225,7 +226,7 @@ def obtener_contexto_grafo(
         for v in G.successors(u):
             if v not in nodos_relevantes: continue
             edges_dict = G.get_edge_data(u, v) or {}
-            for _key, datos_arista in edges_dict.items():
+            for datos_arista in edges_dict.values():
                 rel = datos_arista.get("relacion", "CONECTA_CON")
                 ctx = datos_arista.get("contexto", "")
                 clave = (u, v, rel)

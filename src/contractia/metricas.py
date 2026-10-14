@@ -1,14 +1,13 @@
 """Métricas: tokens consumidos (P1 6.2) y calidad del grafo (P2 2.6.1)."""
 from __future__ import annotations
-from collections import Counter
-from typing import Any, Dict, List, Optional
 
 import threading
+from collections import Counter
+from typing import Any
 
 import networkx as nx
 
 from .utils import extraer_cid_de_string
-
 
 _CAMPOS = ("calls", "input", "cache_write", "cache_read", "output")
 
@@ -17,7 +16,7 @@ class ContadorTokens:
     """Acumula tokens por etapa (agente o fase) a partir de `response.usage` de la API de Claude."""
 
     def __init__(self):
-        self.por_etiqueta: Dict[str, Dict[str, int]] = {}
+        self.por_etiqueta: dict[str, dict[str, int]] = {}
         self._lock = threading.Lock()
 
     def registrar(self, etiqueta: str, usage: Any) -> None:
@@ -55,8 +54,8 @@ class ContadorTokens:
 # --- P2 2.6.1: métricas de calidad del grafo ---
 def calcular_metricas_grafo(
     G: nx.MultiDiGraph,
-    mapa_clausula_a_seccion: Dict[str, Dict],
-) -> Dict[str, Any]:
+    mapa_clausula_a_seccion: dict[str, dict],
+) -> dict[str, Any]:
     """Devuelve un dict con cobertura, fragmentación, distribución y top-degree.
 
     - cobertura: % de cláusulas en `mapa_clausula_a_seccion` que aparecen como nodo.
@@ -70,8 +69,8 @@ def calcular_metricas_grafo(
     cids_en_mapa = set(mapa_clausula_a_seccion.keys())
 
     # Mapa cid -> [nodos]
-    cid_a_nodos: Dict[str, List[str]] = {}
-    nodos_clausula: List[str] = []
+    cid_a_nodos: dict[str, list[str]] = {}
+    nodos_clausula: list[str] = []
     for n in G.nodes():
         cid = extraer_cid_de_string(str(n))
         if cid:
@@ -114,7 +113,7 @@ def calcular_metricas_grafo(
     }
 
 
-def render_metricas_grafo_md(m: Dict[str, Any]) -> str:
+def render_metricas_grafo_md(m: dict[str, Any]) -> str:
     """Genera un fragmento Markdown con la salud del grafo."""
     lineas = ["## Calidad del Grafo de Conocimiento", ""]
     lineas.append(f"- **Nodos / Aristas**: {m['n_nodos']:,} / {m['n_aristas']:,}")

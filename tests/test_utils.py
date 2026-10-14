@@ -1,12 +1,9 @@
 """Tests para utils.py: parse_json_seguro, hash_secciones, canonicalizar_nodo, extraer_cid."""
-import pytest
 from contractia.utils import (
-    parse_json_seguro,
-    extraer_cid_de_string,
     canonicalizar_nodo,
+    extraer_cid_de_string,
     hash_secciones,
-    path_cache_grafo,
-    path_checkpoint_hallazgos,
+    parse_json_seguro,
 )
 
 

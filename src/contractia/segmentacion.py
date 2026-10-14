@@ -5,10 +5,10 @@ que dependen del formato exacto de los contratos en español. Cualquier
 cambio aquí puede romper la detección de capítulos, anexos y cláusulas.
 """
 from __future__ import annotations
-import re
-from typing import List, Dict, Tuple, Set
 
 import logging
+import re
+
 _log = logging.getLogger("contractia.segmentacion")
 
 
@@ -37,8 +37,7 @@ def _is_toc_like(raw_line: str) -> bool:
     line = raw_line.rstrip()
     if re.search(r"[ \.\·•]{3,}\s*\d+\s*$", line): return True
     if line.count(".") >= 6: return True
-    if re.search(r"\s\d{1,4}\s*$", line) and not re.search(r"[a-záéíóúñ]", line): return True
-    return False
+    return bool(re.search(r"\s\d{1,4}\s*$", line) and not re.search(r"[a-záéíóúñ]", line))
 
 
 _UPPER_TOKEN = r"[A-ZÁÉÍÓÚÜÑ0-9]"
@@ -64,8 +63,7 @@ def _is_proper_caps_title(title: str, min_words: int = 2) -> bool:
     words = [w for w in re.split(r"[ \t,;/\-]+", t) if w]
     cap_words = [w for w in words if _UPPER_WORD.match(w)]
     if len(cap_words) >= min_words: return True
-    if len(cap_words) == 1 and len(cap_words[0]) >= 5: return True
-    return False
+    return len(cap_words) == 1 and len(cap_words[0]) >= 5
 
 
 _CAP_RX = re.compile(
@@ -119,11 +117,11 @@ def _roman_to_int(s: str) -> int:
                 int_val += rom_val[s[i]] - 2 * rom_val[s[i-1]]
             else:
                 int_val += rom_val[s[i]]
-    except Exception: return 0
+    except KeyError: return 0
     return int_val
 
 
-def _extraer_numeros_clausula(texto_capitulo: str, prefijo_capitulo: str) -> List[str]:
+def _extraer_numeros_clausula(texto_capitulo: str, prefijo_capitulo: str) -> list[str]:
     ids_encontrados = set()
     for m in _CLAUSE_RX.finditer(texto_capitulo):
         gid = m.group(1) or m.group(2)
@@ -132,14 +130,13 @@ def _extraer_numeros_clausula(texto_capitulo: str, prefijo_capitulo: str) -> Lis
     return list(ids_encontrados)
 
 
-def _validar_secuencia_clausulas(numeros_encontrados: List[str], prefijo: str) -> Tuple[bool, List[str], int]:
+def _validar_secuencia_clausulas(numeros_encontrados: list[str], prefijo: str) -> tuple[bool, list[str], int]:
     indices_primer_nivel = set()
     try:
         for num in numeros_encontrados:
             partes = num.split('.')
-            if len(partes) >= 2 and partes[0] == prefijo:
-                if partes[1].isdigit():
-                    indices_primer_nivel.add(int(partes[1]))
+            if len(partes) >= 2 and partes[0] == prefijo and partes[1].isdigit():
+                indices_primer_nivel.add(int(partes[1]))
     except ValueError: return False, ["Formato numérico inválido"], 0
 
     if not indices_primer_nivel: return True, [], 0
@@ -149,15 +146,15 @@ def _validar_secuencia_clausulas(numeros_encontrados: List[str], prefijo: str) -
     if indices_primer_nivel == conjunto_esperado:
         return True, [], n_clausulas_primer_nivel
     else:
-        faltantes_num = sorted(list(conjunto_esperado - indices_primer_nivel))
+        faltantes_num = sorted(conjunto_esperado - indices_primer_nivel)
         faltantes_str = [f'{prefijo}.{i}' for i in faltantes_num]
         return False, faltantes_str, n_clausulas_primer_nivel
 
 
-def _find_sections(text: str) -> List[Tuple[int,int,str,str]]:
+def _find_sections(text: str) -> list[tuple[int,int,str,str]]:
     t = _norm_text(text)
     L = len(t)
-    raw_hits: List[Tuple[int,str,str]] = []
+    raw_hits: list[tuple[int,str,str]] = []
     for m in _CAP_RX.finditer(t):
         header = _truncate_upper_block(m.group(0).strip())
         raw_hits.append((m.start(), header, "CAPITULO"))
@@ -204,15 +201,15 @@ def _find_sections(text: str) -> List[Tuple[int,int,str,str]]:
         if cur is None or qual > cur["quality"]:
             best_by_key[key] = {"start": s, "end": e, "header": h, "kind": k, "quality": qual}
     chosen = sorted([(v["start"], v["end"], v["header"], v["kind"]) for v in best_by_key.values()], key=lambda x: x[0])
-    spans: List[Tuple[int,int,str,str]] = []
+    spans: list[tuple[int,int,str,str]] = []
     for i, (s, _, h, k) in enumerate(chosen):
         e = chosen[i+1][0] if i+1 < len(chosen) else L
         spans.append((s, e, h, k))
     return spans
 
 
-def _post_secciones(text: str, spans: List[Tuple[int,int,str,str]]) -> List[Dict]:
-    out: List[Dict] = []
+def _post_secciones(text: str, spans: list[tuple[int,int,str,str]]) -> list[dict]:
+    out: list[dict] = []
     for (s, e, h, k) in spans:
         content = text[s:e].strip()
         h = _clean_header(h)
@@ -222,7 +219,7 @@ def _post_secciones(text: str, spans: List[Tuple[int,int,str,str]]) -> List[Dict
     return out
 
 
-def separar_en_secciones(texto_contrato: str) -> List[Dict]:
+def separar_en_secciones(texto_contrato: str) -> list[dict]:
     t = _norm_text(texto_contrato)
     spans = _find_sections(t)
     secciones = _post_secciones(t, spans)
@@ -259,7 +256,7 @@ def separar_en_secciones(texto_contrato: str) -> List[Dict]:
     return secciones
 
 
-def crear_indice_capitulos_anexos(secciones: List[Dict]) -> List[Dict]:
+def crear_indice_capitulos_anexos(secciones: list[dict]) -> list[dict]:
     out = []
     for s in secciones:
         if s["tipo"] == "CAPITULO":
@@ -271,8 +268,8 @@ def crear_indice_capitulos_anexos(secciones: List[Dict]) -> List[Dict]:
     return out
 
 
-def _expand_clause_ranges(text: str) -> Set[str]:
-    found: Set[str] = set()
+def _expand_clause_ranges(text: str) -> set[str]:
+    found: set[str] = set()
     for a, b in _RANGE_RX.findall(text):
         a_parts = a.split("."); b_parts = b.split(".")
         if len(a_parts) == len(b_parts) and a_parts[:-1] == b_parts[:-1]:
@@ -281,11 +278,11 @@ def _expand_clause_ranges(text: str) -> Set[str]:
                 if start <= end:
                     base = ".".join(a_parts[:-1])
                     for k in range(start, end+1): found.add(f"{base}.{k}" if base else str(k))
-            except Exception: pass
+            except ValueError: pass
     return found
 
 
-def _key_sort_clauses(v: str) -> List[int]:
+def _key_sort_clauses(v: str) -> list[int]:
     parts = v.split(".")
     out = []
     for p in parts:
@@ -296,8 +293,8 @@ def _key_sort_clauses(v: str) -> List[int]:
     return out
 
 
-def _clause_ids_in_text(texto: str) -> Set[str]:
-    ids: Set[str] = set()
+def _clause_ids_in_text(texto: str) -> set[str]:
+    ids: set[str] = set()
     t = _norm_text(texto)
     ids |= _expand_clause_ranges(t)
     for m in _CLAUSE_LIST_RX.finditer(t):
@@ -312,7 +309,7 @@ def _clause_ids_in_text(texto: str) -> Set[str]:
     return ids
 
 
-def _get_all_section_numbers_as_str(secciones: List[Dict]) -> Set[str]:
+def _get_all_section_numbers_as_str(secciones: list[dict]) -> set[str]:
     indices = crear_indice_capitulos_anexos(secciones)
     all_ids_raw = {s['n'] for s in indices if s['n'] != '?'}
     all_nums_int_str = set()
@@ -324,14 +321,14 @@ def _get_all_section_numbers_as_str(secciones: List[Dict]) -> Set[str]:
     return all_nums_int_str
 
 
-def crear_indice_de_clausulas_por_seccion(texto_seccion: str) -> List[str]:
+def crear_indice_de_clausulas_por_seccion(texto_seccion: str) -> list[str]:
     ids = list(_clause_ids_in_text(texto_seccion))
     ids.sort(key=_key_sort_clauses)
     return ids
 
 
-def construir_mapa_clausula_a_seccion(secciones: List[Dict]) -> Dict[str, Dict]:
-    mapa: Dict[str, Dict] = {}
+def construir_mapa_clausula_a_seccion(secciones: list[dict]) -> dict[str, dict]:
+    mapa: dict[str, dict] = {}
     for s in secciones:
         tipo_seccion = s.get("tipo", "?")
         titulo_seccion = s.get("titulo", "N/A")
@@ -379,15 +376,13 @@ def construir_mapa_clausula_a_seccion(secciones: List[Dict]) -> Dict[str, Dict]:
                 texto_exacto = contenido_seccion[start_pos:].strip()
 
             # Prioridad absoluta al CAPITULO sobre el ANEXO
-            if cid not in mapa:
-                mapa[cid] = {"tipo": tipo_seccion, "seccion": titulo_seccion, "texto": texto_exacto}
-            elif tipo_seccion == "CAPITULO" and mapa[cid]["tipo"] == "ANEXO":
+            if cid not in mapa or tipo_seccion == "CAPITULO" and mapa[cid]["tipo"] == "ANEXO":
                 mapa[cid] = {"tipo": tipo_seccion, "seccion": titulo_seccion, "texto": texto_exacto}
 
     return mapa
 
 
-def crear_indice_global_clausulas(secciones: List[Dict]) -> List[str]:
+def crear_indice_global_clausulas(secciones: list[dict]) -> list[str]:
     mapa_definiciones = construir_mapa_clausula_a_seccion(secciones)
     defined_clauses_set = set(mapa_definiciones.keys())
     section_nums_str = _get_all_section_numbers_as_str(secciones)

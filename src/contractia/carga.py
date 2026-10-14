@@ -1,25 +1,25 @@
 """Carga de documentos PDF/DOCX desde una carpeta (celda 2 del notebook)."""
 from __future__ import annotations
+
 import os
-from typing import List, Optional, Tuple
 
 from .logging_setup import get_logger
 
 log = get_logger("carga")
 
 
-def _leer_pdf(file_path: str) -> List[str]:
+def _leer_pdf(file_path: str) -> list[str]:
     from pypdf import PdfReader
     return [pagina.extract_text() or "" for pagina in PdfReader(file_path).pages]
 
 
-def _leer_docx(file_path: str) -> List[str]:
+def _leer_docx(file_path: str) -> list[str]:
     from docx import Document
     return ["\n".join(p.text for p in Document(file_path).paragraphs)]
 
 
-def procesar_documentos_carpeta(folder_path: str) -> Tuple[Optional[List[str]], Optional[str]]:
-    paginas_combinadas: List[str] = []
+def procesar_documentos_carpeta(folder_path: str) -> tuple[list[str] | None, str | None]:
+    paginas_combinadas: list[str] = []
     texto_completo = ""
     full_folder_path = os.path.join(os.getcwd(), folder_path)
 
@@ -48,7 +48,7 @@ def procesar_documentos_carpeta(folder_path: str) -> Tuple[Optional[List[str]], 
             if texto_completo:
                 texto_completo += f"\n\n=== ARCHIVO: {file_name} ===\n\n"
             texto_completo += "\n\n".join(paginas)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.warning("  No se pudo cargar %s: %s", file_name, e)
 
     return paginas_combinadas, texto_completo

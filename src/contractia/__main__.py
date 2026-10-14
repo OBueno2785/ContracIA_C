@@ -1,5 +1,6 @@
 """Ejecución local: `python -m contractia [--contrato CARPETA] [--sin-chat]`."""
 from __future__ import annotations
+
 import argparse
 import os
 

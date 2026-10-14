@@ -4,6 +4,7 @@ Un único entry point: `setup_logger()`. Coloca un FileHandler con timestamps
 para debugging y un StreamHandler conciso para la consola del notebook.
 """
 from __future__ import annotations
+
 import logging
 from pathlib import Path
 

@@ -1,10 +1,9 @@
 """Tests para funciones no-regex de segmentacion.py."""
-import pytest
 from contractia.segmentacion import (
-    _roman_to_int,
-    _key_sort_clauses,
-    _expand_clause_ranges,
     _clause_ids_in_text,
+    _expand_clause_ranges,
+    _key_sort_clauses,
+    _roman_to_int,
     crear_indice_de_clausulas_por_seccion,
 )
 

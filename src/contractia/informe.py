@@ -1,12 +1,13 @@
 """Renderizado del informe de auditoría (P2 8.1/8.2: dashboard + deduplicación)."""
 from __future__ import annotations
-from typing import Any, Dict, List
+
+from typing import Any
 
 from .segmentacion import _key_sort_clauses
 
 
 # --- P2 8.2: deduplicación de hallazgos ---
-def deduplicar_hallazgos(hallazgos: List[Dict]) -> List[Dict]:
+def deduplicar_hallazgos(hallazgos: list[dict]) -> list[dict]:
     """Elimina hallazgos duplicados por (tipo, clausula_afectada, primeros 60 chars de explicacion)."""
     vistos = set()
     out = []
@@ -23,9 +24,9 @@ def deduplicar_hallazgos(hallazgos: List[Dict]) -> List[Dict]:
 
 
 # --- P2 8.1: dashboard de severidades ---
-def dashboard_severidades(resultados: List[Dict]) -> str:
+def dashboard_severidades(resultados: list[dict]) -> str:
     """Genera tabla Markdown con conteo de hallazgos por nivel de severidad."""
-    conteos: Dict[str, int] = {"CRITICA": 0, "ALTA": 0, "MEDIA": 0, "BAJA": 0}
+    conteos: dict[str, int] = {"CRITICA": 0, "ALTA": 0, "MEDIA": 0, "BAJA": 0}
     for r in resultados:
         for h in r.get("hallazgos", []):
             sev = (
@@ -50,7 +51,7 @@ def dashboard_severidades(resultados: List[Dict]) -> str:
     return "\n".join(lineas)
 
 
-def render_auditoria_markdown(resultado: Dict[str, Any]) -> str:
+def render_auditoria_markdown(resultado: dict[str, Any]) -> str:
     if resultado.get("abortado_por_seguridad"):
         return (
             "# Informe de Auditoría Contractual\n\n"
@@ -97,7 +98,7 @@ def render_auditoria_markdown(resultado: Dict[str, Any]) -> str:
         hallazgos = res_sec["hallazgos"]
         md.append(f"\n### {titulo_sec}")
 
-        mapa_clausulas: Dict[str, list] = {}
+        mapa_clausulas: dict[str, list] = {}
         for h in hallazgos:
             c_id = h.get("clausula_afectada", "General") if isinstance(h, dict) else getattr(h, "clausula_afectada", "General")
             mapa_clausulas.setdefault(c_id, []).append(h)

@@ -1,8 +1,8 @@
 """Chatbot Q&A con GraphRAG real y multi-turn (celda 7 del notebook)."""
 from __future__ import annotations
+
 import re
 from datetime import datetime
-from typing import Dict, List, Optional, Set, Tuple
 
 import networkx as nx
 
@@ -20,10 +20,10 @@ _PATRON_ANEXO_PREG = re.compile(r"anexo[\s]+([IVXLCDM\d]+|[A-Z])\b", re.IGNORECA
 def _seleccionar_nodos_seed(
     pregunta: str,
     G: nx.MultiDiGraph,
-    indice_nodos: Dict[str, List[str]],
-    indice_secciones: List[Dict],
-) -> Set[str]:
-    seeds: Set[str] = set()
+    indice_nodos: dict[str, list[str]],
+    indice_secciones: list[dict],
+) -> set[str]:
+    seeds: set[str] = set()
 
     for m in re.finditer(_NUM_PATTERN, pregunta):
         cid = m.group(0)
@@ -35,12 +35,11 @@ def _seleccionar_nodos_seed(
     anexos_preguntados = {m.group(1).upper() for m in _PATRON_ANEXO_PREG.finditer(pregunta)}
     for s in indice_secciones:
         n_norm = (s.get("n", "") or "").upper()
-        if s["tipo"] == "CAPITULO" and n_norm in capitulos_preguntados:
-            if s["titulo"] in G:
-                seeds.add(s["titulo"])
-        elif s["tipo"] == "ANEXO" and n_norm in anexos_preguntados:
-            if s["titulo"] in G:
-                seeds.add(s["titulo"])
+        if s["titulo"] in G and (
+            (s["tipo"] == "CAPITULO" and n_norm in capitulos_preguntados)
+            or (s["tipo"] == "ANEXO" and n_norm in anexos_preguntados)
+        ):
+            seeds.add(s["titulo"])
 
     if not seeds:
         tokens = {t.lower() for t in re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{5,}", pregunta)}
@@ -51,9 +50,9 @@ def _seleccionar_nodos_seed(
     return seeds
 
 
-def _ego_subgrafo(G: nx.MultiDiGraph, seeds: Set[str], radius: int = 2) -> Set[str]:
+def _ego_subgrafo(G: nx.MultiDiGraph, seeds: set[str], radius: int = 2) -> set[str]:
     G_und = G.to_undirected(as_view=True)
-    nodos: Set[str] = set()
+    nodos: set[str] = set()
     for seed in seeds:
         try:
             nodos.update(nx.ego_graph(G_und, seed, radius=radius, undirected=True).nodes())
@@ -62,17 +61,17 @@ def _ego_subgrafo(G: nx.MultiDiGraph, seeds: Set[str], radius: int = 2) -> Set[s
     return nodos
 
 
-def _resumen_subgrafo(G: nx.MultiDiGraph, nodos: Set[str]) -> str:
+def _resumen_subgrafo(G: nx.MultiDiGraph, nodos: set[str]) -> str:
     if not nodos:
         return "(sin contexto del grafo)"
-    lineas: List[str] = []
+    lineas: list[str] = []
     for u in nodos:
         if u not in G:
             continue
         for v in G.successors(u):
             if v not in nodos:
                 continue
-            for _key, data in (G.get_edge_data(u, v) or {}).items():
+            for data in (G.get_edge_data(u, v) or {}).values():
                 rel = data.get("relacion", "CONECTA_CON")
                 ctx = data.get("contexto", "")
                 lineas.append(f"[{u}] --({rel})--> [{v}] (Contexto: {ctx})")
@@ -80,9 +79,8 @@ def _resumen_subgrafo(G: nx.MultiDiGraph, nodos: Set[str]) -> str:
 
 
 def _recolectar_textos_relevantes(
-    nodos_relevantes: Set[str],
-    secciones: List[Dict],
-    indice_secciones: List[Dict],
+    nodos_relevantes: set[str],
+    secciones: list[dict],
 ) -> str:
     titulos_sec = {s["titulo"] for s in secciones}
     titulos_relevantes = nodos_relevantes & titulos_sec
@@ -98,7 +96,7 @@ def _recolectar_textos_relevantes(
 
     if not titulos_relevantes:
         return "(sin texto relevante)"
-    bloques: List[str] = []
+    bloques: list[str] = []
     for s in secciones:
         if s["titulo"] in titulos_relevantes:
             bloques.append(f"\n=== {s['titulo']} ===\n{s['contenido']}")
@@ -126,17 +124,17 @@ INSTRUCCIONES_CHAT = (
 def consultar_contrato_graphrag(
     pregunta_usuario: str,
     G: nx.MultiDiGraph,
-    secciones: List[Dict],
-    indice_secciones: List[Dict],
-    indice_nodos_grafo: Dict[str, List[str]],
+    secciones: list[dict],
+    indice_secciones: list[dict],
+    indice_nodos_grafo: dict[str, list[str]],
     llm: ClienteClaude,
-    historial: Optional[List[Tuple[str, str]]] = None,
+    historial: list[tuple[str, str]] | None = None,
     imprimir: bool = False,
 ) -> str:
     seeds = _seleccionar_nodos_seed(pregunta_usuario, G, indice_nodos_grafo, indice_secciones)
     nodos_relevantes = _ego_subgrafo(G, seeds, radius=2) if seeds else set()
     contexto_grafo = _resumen_subgrafo(G, nodos_relevantes)
-    textos_relevantes = _recolectar_textos_relevantes(nodos_relevantes, secciones, indice_secciones)
+    textos_relevantes = _recolectar_textos_relevantes(nodos_relevantes, secciones)
 
     str_indice = "\n".join([f"- {s['tipo']} {s['n']}: {s['titulo']}" for s in indice_secciones])
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
@@ -153,7 +151,7 @@ def consultar_contrato_graphrag(
         f"<pregunta_usuario>\n{pregunta_usuario}\n</pregunta_usuario>"
     )
 
-    partes: List[str] = []
+    partes: list[str] = []
     for fragmento in llm.texto_en_streaming("chat", INSTRUCCIONES_CHAT, contenido):
         partes.append(fragmento)
         if imprimir:
@@ -165,9 +163,9 @@ def consultar_contrato_graphrag(
 
 def iniciar_chat_interactivo(
     G: nx.MultiDiGraph,
-    secciones: List[Dict],
-    indice_secciones: List[Dict],
-    indice_nodos_grafo: Dict[str, List[str]],
+    secciones: list[dict],
+    indice_secciones: list[dict],
+    indice_nodos_grafo: dict[str, list[str]],
     llm: ClienteClaude,
 ) -> None:
     print("\n" + "=" * 50)
@@ -175,7 +173,7 @@ def iniciar_chat_interactivo(
     print("Escribe 'salir' para terminar.")
     print("=" * 50 + "\n")
 
-    historial: List[Tuple[str, str]] = []
+    historial: list[tuple[str, str]] = []
     while True:
         pregunta = input("\nTú: ")
         if pregunta.lower() in ["salir", "exit", "quit"]:
@@ -192,5 +190,5 @@ def iniciar_chat_interactivo(
                 historial=historial, imprimir=True,
             )
             historial.append((pregunta, respuesta))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.warning("Error al consultar: %s", e)

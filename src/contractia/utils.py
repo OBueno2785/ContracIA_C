@@ -1,12 +1,13 @@
 """Helpers transversales (parseo de JSON, hashing, canonicalización)."""
 from __future__ import annotations
+
 import hashlib
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from .segmentacion import _NUM_PATTERN, _extraer_num_cap, _extraer_num_anexo
+from .segmentacion import _NUM_PATTERN, _extraer_num_anexo, _extraer_num_cap
 
 
 def parse_json_seguro(texto_llm: str) -> Any:
@@ -26,18 +27,18 @@ def parse_json_seguro(texto_llm: str) -> Any:
         try:
             match = re.search(r"(\{.*\}|\[.*\])", texto, re.DOTALL)
             if match: return json.loads(match.group(0))
-        except Exception:
+        except json.JSONDecodeError:
             pass
         return {}
 
 
-def extraer_cid_de_string(s: str) -> Optional[str]:
+def extraer_cid_de_string(s: str) -> str | None:
     """Extrae el primer ID con formato N.N(.N)... (reusa _NUM_PATTERN)."""
     m = re.search(_NUM_PATTERN, s)
     return m.group(0) if m else None
 
 
-def canonicalizar_nodo(raw: str, mapa_clausula_a_seccion: Dict[str, Dict]) -> str:
+def canonicalizar_nodo(raw: str, mapa_clausula_a_seccion: dict[str, dict]) -> str:
     """String libre del LLM → identificador canónico estable usando el mapa."""
     if not isinstance(raw, str): return str(raw)
     raw_clean = " ".join(raw.split()).strip()
@@ -57,7 +58,7 @@ def canonicalizar_nodo(raw: str, mapa_clausula_a_seccion: Dict[str, Dict]) -> st
     return raw_clean
 
 
-def hash_secciones(secciones: List[Dict]) -> str:
+def hash_secciones(secciones: list[dict]) -> str:
     payload = json.dumps(
         [(s.get("titulo", ""), s.get("contenido", "")) for s in secciones],
         sort_keys=True, ensure_ascii=False,
@@ -65,11 +66,11 @@ def hash_secciones(secciones: List[Dict]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def path_cache_grafo(secciones: List[Dict], cache_dir: str) -> str:
+def path_cache_grafo(secciones: list[dict], cache_dir: str) -> str:
     os.makedirs(cache_dir, exist_ok=True)
     return os.path.join(cache_dir, f"grafo_{hash_secciones(secciones)}.pkl")
 
 
-def path_checkpoint_hallazgos(secciones: List[Dict], cache_dir: str) -> str:
+def path_checkpoint_hallazgos(secciones: list[dict], cache_dir: str) -> str:
     os.makedirs(cache_dir, exist_ok=True)
     return os.path.join(cache_dir, f"hallazgos_{hash_secciones(secciones)}.jsonl")
