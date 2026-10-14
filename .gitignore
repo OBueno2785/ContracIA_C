@@ -13,3 +13,4 @@ logs/
 *.log
 contrato_nuevo/
 !.vscode/*.json
+*.egg-info/
