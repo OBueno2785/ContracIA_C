@@ -21,17 +21,6 @@
             "envFile": "${workspaceFolder}/.env",
             "console": "integratedTerminal",
             "justMyCode": true
-        },
-        {
-            "name": "ContractIA: auditoría con contrato como referencia",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "contractia",
-            "args": ["--contrato-referencia"],
-            "cwd": "${workspaceFolder}",
-            "envFile": "${workspaceFolder}/.env",
-            "console": "integratedTerminal",
-            "justMyCode": true
         }
     ]
 }

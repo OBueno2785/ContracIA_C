@@ -46,7 +46,7 @@ class AgenteEspecialista:
         self.schema = schema
         self.etiqueta = etiqueta
 
-    async def aejecutar(self, contenido: str, referencia: str | None = None):
+    async def aejecutar(self, contenido: str, referencia: str):
         try:
             return await self.llm.estructurado(
                 self.etiqueta, self.instrucciones, contenido, self.schema, referencia
@@ -57,7 +57,7 @@ class AgenteEspecialista:
 
 
 _REGLA_REFERENCIA = (
-    "- **CONTRATO COMPLETO:** Si se provee <contrato_completo>, úsalo SOLO como material de consulta "
+    "- **CONTRATO COMPLETO:** El <contrato_completo> es SOLO material de consulta "
     "para verificar referencias; los hallazgos deben corresponder exclusivamente al <texto_seccion>.\n"
 )
 
@@ -129,7 +129,7 @@ async def auditar_consistencia_async(
     jurista: AgenteEspecialista,
     auditor: AgenteEspecialista,
     cronista: AgenteEspecialista,
-    referencia: str | None = None,
+    referencia: str,
 ) -> list[dict]:
     if not CFG.enable_llm:
         return []
@@ -242,7 +242,7 @@ async def _auditar_seccion_async(
     auditor_ag: AgenteEspecialista,
     cronista: AgenteEspecialista,
     semaforo: asyncio.Semaphore,
-    referencia: str | None = None,
+    referencia: str,
 ) -> dict | None:
     contenido = sec.get("contenido", "")
     titulo = sec.get("titulo", "Sección")
@@ -270,7 +270,7 @@ async def _auditar_seccion_async(
 
 async def _auditar_todas_async(
     secciones, grafo_contrato, indice_nodos_grafo, mapa_clausula_a_seccion,
-    llm, jurista, auditor_ag, cronista, checkpoint_path, referencia=None,
+    llm, jurista, auditor_ag, cronista, checkpoint_path, referencia,
 ) -> list[dict]:
     cache_existente = _cargar_checkpoint(checkpoint_path)
     if cache_existente:
@@ -283,23 +283,26 @@ async def _auditar_todas_async(
     if not pendientes:
         return resultados
 
-    async with llm.sesion():
-        tareas = [
-            _auditar_seccion_async(
-                sec, grafo_contrato, indice_nodos_grafo, mapa_clausula_a_seccion,
-                jurista, auditor_ag, cronista, semaforo, referencia,
-            )
-            for sec in pendientes
-        ]
+    def _auditar(sec):
+        return _auditar_seccion_async(
+            sec, grafo_contrato, indice_nodos_grafo, mapa_clausula_a_seccion,
+            jurista, auditor_ag, cronista, semaforo, referencia,
+        )
 
-        pbar = tqdm(total=len(tareas), desc="Auditando Secciones")
-        for fut in asyncio.as_completed(tareas):
-            registro = await fut
-            if registro is not None:
-                _appendear_checkpoint(checkpoint_path, registro)
-                resultados.append(registro)
-            pbar.update(1)
-            pbar.set_postfix(hallazgos=sum(len(r["hallazgos"]) for r in resultados))
+    def _registrar(registro):
+        if registro is not None:
+            _appendear_checkpoint(checkpoint_path, registro)
+            resultados.append(registro)
+        pbar.update(1)
+        pbar.set_postfix(hallazgos=sum(len(r["hallazgos"]) for r in resultados))
+
+    async with llm.sesion():
+        pbar = tqdm(total=len(pendientes), desc="Auditando Secciones")
+        # La primera sección va sola: escribe en caché el contrato completo antes de la ráfaga
+        # concurrente, para que el resto de llamadas lo lean en vez de volver a escribirlo.
+        _registrar(await _auditar(pendientes[0]))
+        for fut in asyncio.as_completed([_auditar(sec) for sec in pendientes[1:]]):
+            _registrar(await fut)
         pbar.close()
     return resultados
 
@@ -353,11 +356,11 @@ def ejecutar_auditoria_contrato(
         + " | ANEXOS: " + (", ".join(nombres_anexos) or "Ninguno")
     )
     jurista, auditor_ag, cronista = _crear_agentes(llm, str_idx_glob)
-    referencia = _referencia_contrato(secciones) if CFG.contrato_como_referencia else None
+    referencia = _referencia_contrato(secciones)
 
     log.info(
-        "Iniciando auditoría en %d secciones (concurrencia=%d, contrato como referencia=%s)...",
-        len(secciones), CFG.max_concurrencia_auditoria, bool(referencia),
+        "Iniciando auditoría en %d secciones (concurrencia=%d, contrato completo como referencia)...",
+        len(secciones), CFG.max_concurrencia_auditoria,
     )
 
     checkpoint_path = path_checkpoint_hallazgos(secciones, cache_dir)

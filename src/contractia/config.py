@@ -38,10 +38,6 @@ class Config:
         "chat": _env_effort("chat", "medium"),
     })
 
-    # Enviar el contrato completo (cacheado) como referencia a los 3 agentes.
-    # Mejora la verificación de referencias cruzadas; aumenta el costo por ejecución.
-    contrato_como_referencia: bool = field(default_factory=lambda: os.getenv("CONTRACTIA_CONTRATO_REFERENCIA", "0") == "1")
-
     # Concurrencia
     max_concurrencia_grafo: int = field(default_factory=lambda: int(os.getenv("CONTRACTIA_CONC_GRAFO", "5")))
     max_concurrencia_auditoria: int = field(default_factory=lambda: int(os.getenv("CONTRACTIA_CONC_AUDITORIA", "3")))
