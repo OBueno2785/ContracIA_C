@@ -24,6 +24,7 @@ class Config:
     # Modelo (Claude API)
     modelo: str = field(default_factory=lambda: os.getenv("CONTRACTIA_MODEL", "claude-opus-5-5"))
     max_output_tokens: int = field(default_factory=lambda: int(os.getenv("CONTRACTIA_MAX_OUTPUT_TOKENS", "16000")))
+    max_output_sintesis: int = field(default_factory=lambda: int(os.getenv("CONTRACTIA_MAX_OUTPUT_SINTESIS", "64000")))
     timeout_segundos: int = field(default_factory=lambda: int(os.getenv("CONTRACTIA_TIMEOUT", "600")))
     max_reintentos_sdk: int = field(default_factory=lambda: int(os.getenv("CONTRACTIA_MAX_RETRIES", "4")))
     usar_fallbacks: bool = field(default_factory=lambda: os.getenv("CONTRACTIA_FALLBACKS", "1") == "1")
@@ -36,11 +37,15 @@ class Config:
         "auditor": _env_effort("auditor", "high"),
         "cronista": _env_effort("cronista", "medium"),
         "chat": _env_effort("chat", "medium"),
+        "sintesis": _env_effort("sintesis", "high"),
     })
 
     # Concurrencia
     max_concurrencia_grafo: int = field(default_factory=lambda: int(os.getenv("CONTRACTIA_CONC_GRAFO", "5")))
     max_concurrencia_auditoria: int = field(default_factory=lambda: int(os.getenv("CONTRACTIA_CONC_AUDITORIA", "3")))
+
+    # Páginas con tablas o escaneadas que se adjuntan como PDF a los agentes (0 = ninguna)
+    max_paginas_visuales: int = field(default_factory=lambda: int(os.getenv("CONTRACTIA_MAX_PAGINAS_VISUALES", "60")))
 
     # Paths
     ruta_contrato: str = field(default_factory=lambda: os.getenv("CONTRACTIA_RUTA_CONTRATO", "contrato_nuevo"))

@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 
 from .auditoria import ejecutar_auditoria_contrato
-from .carga import procesar_documentos_carpeta
+from .carga import construir_pdf_visual, procesar_documentos_carpeta
 from .chat import iniciar_chat_interactivo
 from .config import CFG
 from .grafo import construir_indice_nodos_por_cid
@@ -53,9 +53,17 @@ def main(chat: bool = True) -> None:
         log.error("No se encontraron documentos en '%s'. Abortando.", CFG.ruta_contrato)
         return
 
+    log.info("PASO 1b: Detectando páginas con tablas o escaneadas...")
+    try:
+        pdf_visual, paginas_visuales = construir_pdf_visual(CFG.ruta_contrato, CFG.max_paginas_visuales)
+    except Exception as e:  # noqa: BLE001
+        log.warning("No se pudo armar el PDF de páginas visuales; se sigue solo con texto: %s", e)
+        pdf_visual, paginas_visuales = None, []
+
     start_time = time.time()
     try:
-        resultado = ejecutar_auditoria_contrato(texto_contrato=texto_contrato, llm=llm)
+        resultado = ejecutar_auditoria_contrato(texto_contrato=texto_contrato, llm=llm, pdf_visual=pdf_visual)
+        resultado["paginas_visuales"] = paginas_visuales
     except Exception as e:  # noqa: BLE001
         log.error("Error ejecutando el pipeline de auditoría: %s", e)
         import traceback

@@ -3,6 +3,7 @@ from contractia.informe import (
     dashboard_severidades,
     deduplicar_hallazgos,
     render_auditoria_markdown,
+    render_sintesis_md,
 )
 
 
@@ -123,3 +124,45 @@ class TestRenderAuditoriaMarkdown:
         md = render_auditoria_markdown(self._resultado_base())
         assert "1.1" in md
         assert "1.2" in md
+
+
+# ----- Síntesis global -----
+
+
+def _sintesis():
+    return {
+        "resumen_ejecutivo": "Contrato de concesión con riesgos de plazos.",
+        "hallazgos_globales": [{"clausula_afectada": "7.1", "tipo": "CONTRADICCION", "severidad": "ALTA",
+                                "explicacion": "Plazo distinto al del Anexo 5", "cita": "30 Días"}],
+        "ausencias": [],
+        "hallazgos_observados": [{"seccion": "CAPÍTULO II", "clausula_afectada": "2.1", "motivo": "Duplicado"}],
+    }
+
+
+def test_render_sintesis_secciones():
+    md = render_sintesis_md(_sintesis())
+    assert "## Síntesis Global" in md
+    assert "Hallazgos globales (1)" in md and "CONTRADICCION" in md and "Plazo distinto" in md
+    assert "Elementos ausentes o incompletos (0)" in md and "Sin ausencias" in md
+    assert "posibles duplicados o falsos positivos (1)" in md
+
+
+def test_render_sintesis_sin_observados_omite_seccion():
+    s = _sintesis()
+    s["hallazgos_observados"] = []
+    assert "falsos positivos" not in render_sintesis_md(s)
+
+
+def test_informe_incluye_sintesis_y_paginas_visuales():
+    resultado = {
+        "indice_secciones": [], "indice_global_clausulas": [], "resultados_auditoria": [],
+        "sintesis": _sintesis(), "paginas_visuales": ["c.pdf p.3", "c.pdf p.9"],
+    }
+    md = render_auditoria_markdown(resultado)
+    assert "Síntesis Global" in md
+    assert "(tablas/escaneos)**: 2" in md
+
+
+def test_informe_sin_sintesis_sigue_funcionando():
+    md = render_auditoria_markdown({"indice_secciones": [], "indice_global_clausulas": [], "resultados_auditoria": [], "sintesis": None})
+    assert "Síntesis Global" not in md

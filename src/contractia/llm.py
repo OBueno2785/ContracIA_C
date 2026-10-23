@@ -56,6 +56,21 @@ def bloques_system(instrucciones: str, referencia: str | None = None) -> list:
     return bloques
 
 
+def contenido_usuario(contenido: str, pdf_visual: str | None = None) -> str | list:
+    """Sin PDF, texto plano. Con PDF, el documento va primero y cacheado (es igual en todas las llamadas)."""
+    if not pdf_visual:
+        return contenido
+    return [
+        {
+            "type": "document",
+            "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_visual},
+            "title": "Páginas del contrato con tablas, cuadros o escaneadas",
+            "cache_control": {"type": "ephemeral"},
+        },
+        {"type": "text", "text": contenido},
+    ]
+
+
 class ClienteClaude:
     def __init__(self, modelo: str | None = None):
         self.modelo = modelo or CFG.modelo
@@ -93,15 +108,27 @@ class ClienteClaude:
         contenido: str,
         schema: type[T],
         referencia: str | None = None,
+        pdf_visual: str | None = None,
+        max_tokens: int | None = None,
+        streaming: bool = False,
     ) -> T:
         if self._async is None:
             raise RuntimeError("Usa `async with cliente.sesion():` antes de llamar al modelo.")
-        resp = await self._async.beta.messages.parse(
-            system=bloques_system(instrucciones, referencia),
-            messages=[{"role": "user", "content": contenido}],
-            output_format=schema,
-            **self._kwargs(etapa),
-        )
+        kwargs = self._kwargs(etapa)
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
+        peticion = {
+            "system": bloques_system(instrucciones, referencia),
+            "messages": [{"role": "user", "content": contenido_usuario(contenido, pdf_visual)}],
+            "output_format": schema,
+            **kwargs,
+        }
+        if streaming:
+            # Respuestas largas: el stream evita cortes por timeout en peticiones de muchos minutos.
+            async with self._async.beta.messages.stream(**peticion) as stream:
+                resp = await stream.get_final_message()
+        else:
+            resp = await self._async.beta.messages.parse(**peticion)
         self.tokens.registrar(etapa, resp.usage)
         if resp.stop_reason == "refusal":
             categoria = getattr(resp.stop_details, "category", None) if resp.stop_details else None

@@ -51,6 +51,41 @@ def dashboard_severidades(resultados: list[dict]) -> str:
     return "\n".join(lineas)
 
 
+def _render_lista_hallazgos(hallazgos: list[dict]) -> list[str]:
+    lineas: list[str] = []
+    for h in hallazgos:
+        lineas.append(
+            f"- **[{h.get('tipo', 'ERROR')}]** ({h.get('severidad', 'MEDIA')}) "
+            f"Cláusula {h.get('clausula_afectada', 'General')}"
+        )
+        lineas.append(f"  - *Problema:* {h.get('explicacion', '')}")
+        if h.get("cita"):
+            lineas.append(f"  - *Cita:* \"{h['cita']}\"")
+    return lineas
+
+
+def render_sintesis_md(sintesis: dict[str, Any]) -> str:
+    md = ["\n## Síntesis Global"]
+    if sintesis.get("resumen_ejecutivo"):
+        md.append(sintesis["resumen_ejecutivo"])
+
+    globales = sintesis.get("hallazgos_globales") or []
+    md.append(f"\n### Hallazgos globales ({len(globales)})")
+    md.extend(_render_lista_hallazgos(globales) or ["_Sin hallazgos globales._"])
+
+    ausencias = sintesis.get("ausencias") or []
+    md.append(f"\n### Elementos ausentes o incompletos ({len(ausencias)})")
+    md.extend(_render_lista_hallazgos(ausencias) or ["_Sin ausencias detectadas._"])
+
+    observados = sintesis.get("hallazgos_observados") or []
+    if observados:
+        md.append(f"\n### Hallazgos observados: posibles duplicados o falsos positivos ({len(observados)})")
+        md.append("_Se mantienen en el detalle por sección; revísalos antes de descartarlos._")
+        for o in observados:
+            md.append(f"- {o.get('seccion', '')} · Cláusula {o.get('clausula_afectada', 'General')}: {o.get('motivo', '')}")
+    return "\n".join(md)
+
+
 def render_auditoria_markdown(resultado: dict[str, Any]) -> str:
     if resultado.get("abortado_por_seguridad"):
         return (
@@ -77,6 +112,11 @@ def render_auditoria_markdown(resultado: dict[str, Any]) -> str:
     md.append(f"- **Secciones Analizadas**: {len(secciones_idx)}")
     md.append(f"- **Cláusulas Definidas**: {len(claus_idx)}")
     md.append(f"- **Total de Inconsistencias Detectadas**: {total_errores}")
+    if resultado.get("paginas_visuales"):
+        md.append(f"- **Páginas analizadas también como imagen (tablas/escaneos)**: {len(resultado['paginas_visuales'])}")
+
+    if resultado.get("sintesis"):
+        md.append(render_sintesis_md(resultado["sintesis"]))
 
     md.append("\n## Dashboard de Severidades")
     md.append(dashboard_severidades(resultados_dedup))

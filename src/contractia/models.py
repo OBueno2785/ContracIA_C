@@ -48,3 +48,26 @@ class TripletaGrafo(BaseModel):
 
 class RespuestaExtraccion(BaseModel):
     tripletas: list[TripletaGrafo] = Field(default_factory=list)
+
+
+# ----- Síntesis global -----
+class HallazgoObservado(BaseModel):
+    seccion: str = Field(default="", description="Sección donde se reportó el hallazgo observado")
+    clausula_afectada: str = Field(default="General")
+    motivo: str = Field(default="", description="Por qué parece duplicado o falso positivo, citando el contrato")
+
+
+class RespuestaSintesis(BaseModel):
+    resumen_ejecutivo: str = Field(default="", description="Panorama del contrato y de sus problemas principales")
+    hallazgos_globales: list[Hallazgo] = Field(
+        default_factory=list,
+        description="Problemas que solo se ven mirando el contrato completo (contradicciones entre capítulos, reparto de riesgos, coherencia económica)",
+    )
+    ausencias: list[Hallazgo] = Field(
+        default_factory=list,
+        description="Elementos ausentes o incompletos (procedimientos sin plazo, obligaciones sin consecuencia, remisiones a anexos que no existen)",
+    )
+    hallazgos_observados: list[HallazgoObservado] = Field(
+        default_factory=list,
+        description="Hallazgos de los agentes que parecen duplicados o falsos positivos",
+    )

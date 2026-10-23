@@ -32,6 +32,7 @@ from .segmentacion import (
     crear_indice_global_clausulas,
     separar_en_secciones,
 )
+from .sintesis import ejecutar_sintesis_global
 from .utils import hash_secciones, path_checkpoint_hallazgos
 
 log = get_logger("auditoria")
@@ -46,10 +47,10 @@ class AgenteEspecialista:
         self.schema = schema
         self.etiqueta = etiqueta
 
-    async def aejecutar(self, contenido: str, referencia: str):
+    async def aejecutar(self, contenido: str, referencia: str, pdf_visual: str | None = None):
         try:
             return await self.llm.estructurado(
-                self.etiqueta, self.instrucciones, contenido, self.schema, referencia
+                self.etiqueta, self.instrucciones, contenido, self.schema, referencia, pdf_visual
             )
         except Exception as e:  # noqa: BLE001
             log.warning("Error en agente '%s': %s", self.etiqueta, e)
@@ -59,6 +60,8 @@ class AgenteEspecialista:
 _REGLA_REFERENCIA = (
     "- **CONTRATO COMPLETO:** El <contrato_completo> es SOLO material de consulta "
     "para verificar referencias; los hallazgos deben corresponder exclusivamente al <texto_seccion>.\n"
+    "- **PÁGINAS VISUALES:** Si se adjunta un PDF con páginas de tablas, cuadros o escaneadas, tómalo como "
+    "la fuente fiel de esas cifras, plazos y montos: el texto extraído de esas páginas puede venir desordenado.\n"
 )
 
 
@@ -130,6 +133,7 @@ async def auditar_consistencia_async(
     auditor: AgenteEspecialista,
     cronista: AgenteEspecialista,
     referencia: str,
+    pdf_visual: str | None = None,
 ) -> list[dict]:
     if not CFG.enable_llm:
         return []
@@ -141,9 +145,9 @@ async def auditar_consistencia_async(
     )
 
     res_juri, res_aud, res_cron = await asyncio.gather(
-        jurista.aejecutar(contenido, referencia),
-        auditor.aejecutar(contenido, referencia),
-        cronista.aejecutar(contenido, referencia),
+        jurista.aejecutar(contenido, referencia, pdf_visual),
+        auditor.aejecutar(contenido, referencia, pdf_visual),
+        cronista.aejecutar(contenido, referencia, pdf_visual),
     )
 
     hallazgos: list[dict] = []
@@ -170,7 +174,9 @@ INSTRUCCIONES_SEGURIDAD = (
 )
 
 
-async def _verificar_seguridad_async(secciones: list[dict], llm: ClienteClaude) -> tuple[bool, str]:
+async def _verificar_seguridad_async(
+    secciones: list[dict], llm: ClienteClaude, pdf_visual: str | None = None
+) -> tuple[bool, str]:
     semaforo = asyncio.Semaphore(CFG.max_concurrencia_grafo)
 
     async def procesar(sec):
@@ -187,8 +193,23 @@ async def _verificar_seguridad_async(secciones: list[dict], llm: ClienteClaude) 
             except Exception as e:  # noqa: BLE001
                 return (False, sec.get("titulo", "?"), f"Error en escaneo (fail-closed): {e}")
 
+    async def procesar_pdf():
+        # Las páginas visuales pueden contener texto que solo se ve en la imagen (p. ej., escaneos).
+        async with semaforo:
+            try:
+                resp = await llm.estructurado(
+                    "seguridad", INSTRUCCIONES_SEGURIDAD,
+                    "<documento>\nEl documento a analizar es el PDF adjunto.\n</documento>",
+                    RespuestaSeguridad, pdf_visual=pdf_visual,
+                )
+                return (resp.es_seguro, "PDF de páginas visuales", resp.evidencia)
+            except Exception as e:  # noqa: BLE001
+                return (False, "PDF de páginas visuales", f"Error en escaneo (fail-closed): {e}")
+
     async with llm.sesion():
         tareas = [asyncio.ensure_future(procesar(s)) for s in secciones]
+        if pdf_visual:
+            tareas.append(asyncio.ensure_future(procesar_pdf()))
         pbar = tqdm(total=len(tareas), desc="Escaneando seguridad")
         try:
             for fut in asyncio.as_completed(tareas):
@@ -204,9 +225,11 @@ async def _verificar_seguridad_async(secciones: list[dict], llm: ClienteClaude) 
             await asyncio.gather(*tareas, return_exceptions=True)
 
 
-def verificar_seguridad_documento(secciones: list[dict], llm: ClienteClaude) -> tuple[bool, str]:
+def verificar_seguridad_documento(
+    secciones: list[dict], llm: ClienteClaude, pdf_visual: str | None = None
+) -> tuple[bool, str]:
     log.info("Iniciando escaneo de seguridad (Detección de Prompt Injection)...")
-    return ejecutar(_verificar_seguridad_async(secciones, llm))
+    return ejecutar(_verificar_seguridad_async(secciones, llm, pdf_visual))
 
 
 # --- Checkpoint JSONL (auditoría resumible) ---
@@ -243,6 +266,7 @@ async def _auditar_seccion_async(
     cronista: AgenteEspecialista,
     semaforo: asyncio.Semaphore,
     referencia: str,
+    pdf_visual: str | None = None,
 ) -> dict | None:
     contenido = sec.get("contenido", "")
     titulo = sec.get("titulo", "Sección")
@@ -260,6 +284,7 @@ async def _auditar_seccion_async(
                 auditor=auditor_ag,
                 cronista=cronista,
                 referencia=referencia,
+                pdf_visual=pdf_visual,
             )
         except Exception as e:  # noqa: BLE001
             log.warning("Error en sección '%s': %s", titulo, e)
@@ -270,7 +295,7 @@ async def _auditar_seccion_async(
 
 async def _auditar_todas_async(
     secciones, grafo_contrato, indice_nodos_grafo, mapa_clausula_a_seccion,
-    llm, jurista, auditor_ag, cronista, checkpoint_path, referencia,
+    llm, jurista, auditor_ag, cronista, checkpoint_path, referencia, pdf_visual=None,
 ) -> list[dict]:
     cache_existente = _cargar_checkpoint(checkpoint_path)
     if cache_existente:
@@ -286,7 +311,7 @@ async def _auditar_todas_async(
     def _auditar(sec):
         return _auditar_seccion_async(
             sec, grafo_contrato, indice_nodos_grafo, mapa_clausula_a_seccion,
-            jurista, auditor_ag, cronista, semaforo, referencia,
+            jurista, auditor_ag, cronista, semaforo, referencia, pdf_visual,
         )
 
     def _registrar(registro):
@@ -317,6 +342,7 @@ def ejecutar_auditoria_contrato(
     llm: ClienteClaude,
     cache_dir: str | None = None,
     usar_cache: bool | None = None,
+    pdf_visual: str | None = None,
 ) -> dict:
     cache_dir = cache_dir or CFG.cache_dir
     if usar_cache is None:
@@ -331,7 +357,7 @@ def ejecutar_auditoria_contrato(
     log.info("ÍNDICE GLOBAL DE CLÁUSULAS: %s", ", ".join(indice_global_clausulas) or "Ninguna")
     log.info("ANEXOS DETECTADOS: %s", ", ".join(nombres_anexos) or "Ninguno")
 
-    es_seguro, evidencia_maliciosa = verificar_seguridad_documento(secciones, llm)
+    es_seguro, evidencia_maliciosa = verificar_seguridad_documento(secciones, llm, pdf_visual)
     if not es_seguro:
         log.critical("ALERTA DE SEGURIDAD: INYECCIÓN DE PROMPT DETECTADA. Evidencia: %s", evidencia_maliciosa)
         return {"abortado_por_seguridad": True, "evidencia": evidencia_maliciosa}
@@ -359,15 +385,15 @@ def ejecutar_auditoria_contrato(
     referencia = _referencia_contrato(secciones)
 
     log.info(
-        "Iniciando auditoría en %d secciones (concurrencia=%d, contrato completo como referencia)...",
-        len(secciones), CFG.max_concurrencia_auditoria,
+        "Iniciando auditoría en %d secciones (concurrencia=%d, contrato completo como referencia, PDF visual=%s)...",
+        len(secciones), CFG.max_concurrencia_auditoria, "sí" if pdf_visual else "no",
     )
 
     checkpoint_path = path_checkpoint_hallazgos(secciones, cache_dir)
     resultados = ejecutar(
         _auditar_todas_async(
             secciones, grafo_contrato, indice_nodos_grafo, mapa_clausula_a_seccion,
-            llm, jurista, auditor_ag, cronista, checkpoint_path, referencia,
+            llm, jurista, auditor_ag, cronista, checkpoint_path, referencia, pdf_visual,
         )
     )
 
@@ -375,12 +401,19 @@ def ejecutar_auditoria_contrato(
     orden = {s["titulo"]: i for i, s in enumerate(secciones)}
     resultados_auditoria.sort(key=lambda r: orden.get(r["seccion"], 999))
 
+    sintesis = ejecutar_sintesis_global(
+        llm, referencia, resultados_auditoria, str_idx_glob, pdf_visual,
+        ruta_cache=os.path.join(cache_dir, f"sintesis_{hash_secciones(secciones)}.json"),
+        usar_cache=usar_cache,
+    )
+
     return {
         "secciones": secciones,
         "indice_secciones": indice_secciones,
         "indice_global_clausulas": indice_global_clausulas,
         "mapa_clausula_a_seccion": mapa_clausula_a_seccion,
         "resultados_auditoria": resultados_auditoria,
+        "sintesis": sintesis,
         "grafo": grafo_contrato,
         "ruta_grafo_png": ruta_grafo_png,
         "checkpoint_path": checkpoint_path,

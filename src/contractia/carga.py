@@ -1,11 +1,26 @@
-"""Carga de documentos PDF/DOCX desde una carpeta (celda 2 del notebook)."""
+"""Carga de documentos PDF/DOCX desde una carpeta y selección de páginas visuales (tablas, escaneos)."""
 from __future__ import annotations
 
+import base64
+import io
 import os
 
 from .logging_setup import get_logger
 
 log = get_logger("carga")
+
+# Una página con menos caracteres que esto y con imágenes se trata como escaneada.
+_MIN_CHARS_PAGINA_TEXTO = 200
+# Límite práctico del PDF adjunto (la API acepta hasta 32 MB por petición, incluido el resto del prompt).
+_MAX_BYTES_PDF_VISUAL = 20 * 1024 * 1024
+
+
+def _resolver_carpeta(folder_path: str) -> str | None:
+    for candidata in (os.path.join(os.getcwd(), folder_path), folder_path):
+        if os.path.exists(candidata):
+            return candidata
+    log.warning("La carpeta '%s' no existe.", folder_path)
+    return None
 
 
 def _leer_pdf(file_path: str) -> list[str]:
@@ -14,20 +29,35 @@ def _leer_pdf(file_path: str) -> list[str]:
 
 
 def _leer_docx(file_path: str) -> list[str]:
+    """Párrafos y tablas en el orden del documento; cada fila de tabla como 'celda | celda'."""
     from docx import Document
-    return ["\n".join(p.text for p in Document(file_path).paragraphs)]
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    doc = Document(file_path)
+    lineas: list[str] = []
+    for hijo in doc.element.body.iterchildren():
+        etiqueta = hijo.tag.rsplit("}", 1)[-1]
+        if etiqueta == "p":
+            lineas.append(Paragraph(hijo, doc).text)
+        elif etiqueta == "tbl":
+            for fila in Table(hijo, doc).rows:
+                celdas: list[str] = []
+                for celda in fila.cells:
+                    texto = " ".join(celda.text.split())
+                    if not celdas or celdas[-1] != texto:  # celdas combinadas se repiten
+                        celdas.append(texto)
+                lineas.append(" | ".join(celdas))
+            lineas.append("")
+    return ["\n".join(lineas)]
 
 
 def procesar_documentos_carpeta(folder_path: str) -> tuple[list[str] | None, str | None]:
     paginas_combinadas: list[str] = []
     texto_completo = ""
-    full_folder_path = os.path.join(os.getcwd(), folder_path)
-
-    if not os.path.exists(full_folder_path):
-        full_folder_path = folder_path
-        if not os.path.exists(full_folder_path):
-            log.warning("La carpeta '%s' no existe.", folder_path)
-            return None, None
+    full_folder_path = _resolver_carpeta(folder_path)
+    if full_folder_path is None:
+        return None, None
 
     archivos_en_carpeta = sorted(os.listdir(full_folder_path))
     if not archivos_en_carpeta: return None, None
@@ -52,3 +82,64 @@ def procesar_documentos_carpeta(folder_path: str) -> tuple[list[str] | None, str
             log.warning("  No se pudo cargar %s: %s", file_name, e)
 
     return paginas_combinadas, texto_completo
+
+
+def _es_pagina_visual(pagina) -> bool:
+    if pagina.find_tables():
+        return True
+    return len(pagina.chars) < _MIN_CHARS_PAGINA_TEXTO and bool(pagina.images)
+
+
+def construir_pdf_visual(folder_path: str, max_paginas: int) -> tuple[str | None, list[str]]:
+    """Reúne en un PDF las páginas con tablas o escaneadas, cuyo texto extraído suele perder estructura.
+
+    Devuelve el PDF en base64 (listo para un bloque `document` de la API) y la lista de páginas incluidas.
+    """
+    import pdfplumber
+    from pypdf import PdfReader, PdfWriter
+
+    full_folder_path = _resolver_carpeta(folder_path)
+    if full_folder_path is None or max_paginas <= 0:
+        return None, []
+
+    seleccion: list[tuple[str, int]] = []
+    for file_name in sorted(os.listdir(full_folder_path)):
+        if not file_name.lower().endswith(".pdf"):
+            continue
+        file_path = os.path.join(full_folder_path, file_name)
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                for i, pagina in enumerate(pdf.pages):
+                    if _es_pagina_visual(pagina):
+                        seleccion.append((file_path, i))
+        except Exception as e:  # noqa: BLE001
+            log.warning("  No se pudo analizar el formato de %s: %s", file_name, e)
+
+    if not seleccion:
+        log.info("No se detectaron páginas con tablas o escaneadas.")
+        return None, []
+    if len(seleccion) > max_paginas:
+        log.warning(
+            "%d páginas visuales detectadas; se adjuntan solo las primeras %d (CONTRACTIA_MAX_PAGINAS_VISUALES).",
+            len(seleccion), max_paginas,
+        )
+        seleccion = seleccion[:max_paginas]
+
+    writer = PdfWriter()
+    lectores: dict[str, PdfReader] = {}
+    for file_path, i in seleccion:
+        lector = lectores.setdefault(file_path, PdfReader(file_path))
+        writer.add_page(lector.pages[i])
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    datos = buffer.getvalue()
+    if len(datos) > _MAX_BYTES_PDF_VISUAL:
+        log.warning(
+            "El PDF de páginas visuales pesa %.1f MB (máx. %d MB); no se adjunta. Reduce CONTRACTIA_MAX_PAGINAS_VISUALES.",
+            len(datos) / 1e6, _MAX_BYTES_PDF_VISUAL // (1024 * 1024),
+        )
+        return None, []
+
+    descripciones = [f"{os.path.basename(f)} p.{i + 1}" for f, i in seleccion]
+    log.info("PDF visual: %d páginas (%.1f MB): %s", len(seleccion), len(datos) / 1e6, ", ".join(descripciones))
+    return base64.standard_b64encode(datos).decode("ascii"), descripciones
