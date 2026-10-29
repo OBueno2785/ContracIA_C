@@ -112,6 +112,7 @@ def construir_pdf_visual(folder_path: str, max_paginas: int) -> tuple[str | None
                 for i, pagina in enumerate(pdf.pages):
                     if _es_pagina_visual(pagina):
                         seleccion.append((file_path, i))
+                    pagina.flush_cache()  # sin esto, un contrato de 300+ páginas acumula cientos de MB
         except Exception as e:  # noqa: BLE001
             log.warning("  No se pudo analizar el formato de %s: %s", file_name, e)
 

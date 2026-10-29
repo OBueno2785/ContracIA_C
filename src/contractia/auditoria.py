@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from dataclasses import dataclass, field
 from datetime import datetime
 
 import networkx as nx
@@ -17,7 +18,7 @@ from .grafo import (
     obtener_contexto_grafo,
     visualizar_grafo,
 )
-from .indices import NO_RECONOCIDO, preparar_contrato
+from .indices import NO_RECONOCIDO, ReporteIndices, preparar_contrato
 from .llm import ClienteClaude, ejecutar
 from .logging_setup import get_logger
 from .models import (
@@ -295,7 +296,7 @@ async def _auditar_seccion_async(
 
 async def _auditar_todas_async(
     secciones, grafo_contrato, indice_nodos_grafo, mapa_clausula_a_seccion,
-    llm, jurista, auditor_ag, cronista, checkpoint_path, referencia, pdf_visual=None,
+    llm, jurista, auditor_ag, cronista, checkpoint_path, referencia, pdf_visual=None, al_avanzar=None,
 ) -> list[dict]:
     cache_existente = _cargar_checkpoint(checkpoint_path)
     if cache_existente:
@@ -319,7 +320,10 @@ async def _auditar_todas_async(
             _appendear_checkpoint(checkpoint_path, registro)
             resultados.append(registro)
         pbar.update(1)
-        pbar.set_postfix(hallazgos=sum(len(r["hallazgos"]) for r in resultados))
+        n_hallazgos = sum(len(r["hallazgos"]) for r in resultados)
+        pbar.set_postfix(hallazgos=n_hallazgos)
+        if al_avanzar:
+            al_avanzar(pbar.n, len(pendientes), n_hallazgos)
 
     async with llm.sesion():
         pbar = tqdm(total=len(pendientes), desc="Auditando Secciones")
@@ -337,6 +341,141 @@ def _referencia_contrato(secciones: list[dict]) -> str:
     return f"<contrato_completo>\n{cuerpo}\n</contrato_completo>"
 
 
+# --- Etapas del pipeline (se pueden ejecutar una a una, p. ej. desde la interfaz web) ---
+@dataclass
+class EstadoAuditoria:
+    llm: ClienteClaude
+    cache_dir: str
+    usar_cache: bool = True
+    pdf_visual: str | None = None
+    texto: str = ""
+    secciones: list[dict] = field(default_factory=list)
+    revision: ReporteIndices | None = None
+    cambios_formato: list[tuple[str, str]] = field(default_factory=list)
+    ruta_normalizado: str | None = None
+    indice_secciones: list[dict] = field(default_factory=list)
+    indice_global_clausulas: list[str] = field(default_factory=list)
+    mapa_clausula_a_seccion: dict[str, dict] = field(default_factory=dict)
+    str_idx_glob: str = ""
+    referencia: str = ""
+    es_seguro: bool | None = None
+    evidencia_seguridad: str = ""
+    grafo: nx.MultiDiGraph | None = None
+    indice_nodos_grafo: dict[str, list[str]] = field(default_factory=dict)
+    ruta_grafo_png: str | None = None
+    checkpoint_path: str | None = None
+    resultados_auditoria: list[dict] | None = None
+    sintesis: dict | None = None
+
+    def resultado(self) -> dict:
+        """Diccionario que consumen el informe y el chat."""
+        if self.revision is not None and self.revision.estado == NO_RECONOCIDO:
+            return {"abortado_por_formato": True, "revision_indices": self.revision.to_dict()}
+        if self.es_seguro is False:
+            return {"abortado_por_seguridad": True, "evidencia": self.evidencia_seguridad}
+        return {
+            "secciones": self.secciones,
+            "indice_secciones": self.indice_secciones,
+            "indice_global_clausulas": self.indice_global_clausulas,
+            "mapa_clausula_a_seccion": self.mapa_clausula_a_seccion,
+            "resultados_auditoria": self.resultados_auditoria or [],
+            "revision_indices": self.revision.to_dict() if self.revision else None,
+            "sintesis": self.sintesis,
+            "grafo": self.grafo,
+            "ruta_grafo_png": self.ruta_grafo_png,
+            "checkpoint_path": self.checkpoint_path,
+        }
+
+
+def etapa_indices(estado: EstadoAuditoria, texto_contrato: str) -> ReporteIndices:
+    """FASE 0: revisión de índices (y adaptación de formato si hace falta), sin llamar al modelo."""
+    texto, secciones, revision, cambios = preparar_contrato(texto_contrato)
+    estado.texto, estado.secciones, estado.revision, estado.cambios_formato = texto, secciones, revision, cambios
+    if cambios:
+        os.makedirs(estado.cache_dir, exist_ok=True)
+        estado.ruta_normalizado = os.path.join(estado.cache_dir, f"contrato_normalizado_{hash_secciones(secciones)}.txt")
+        with open(estado.ruta_normalizado, "w", encoding="utf-8") as f:
+            f.write(texto)
+        log.info("Formato adaptado al estándar (%d cambios). Texto usado: %s", len(cambios), estado.ruta_normalizado)
+    if revision.estado == NO_RECONOCIDO:
+        log.critical("No se reconoció la estructura del contrato; se detiene antes de llamar al modelo.")
+        return revision
+    for problema in revision.problemas:
+        log.warning("  Índices: %s", problema)
+
+    estado.indice_secciones = crear_indice_capitulos_anexos(secciones)
+    estado.indice_global_clausulas = crear_indice_global_clausulas(secciones)
+    estado.mapa_clausula_a_seccion = construir_mapa_clausula_a_seccion(secciones)
+    nombres_anexos = [s["titulo"] for s in secciones if s["tipo"] == "ANEXO"]
+    estado.str_idx_glob = (
+        "CLÁUSULAS: " + (", ".join(estado.indice_global_clausulas) or "Ninguna")
+        + " | ANEXOS: " + (", ".join(nombres_anexos) or "Ninguno")
+    )
+    estado.referencia = _referencia_contrato(secciones)
+    estado.checkpoint_path = path_checkpoint_hallazgos(secciones, estado.cache_dir)
+    log.info("ÍNDICE GLOBAL DE CLÁUSULAS: %s", ", ".join(estado.indice_global_clausulas) or "Ninguna")
+    log.info("ANEXOS DETECTADOS: %s", ", ".join(nombres_anexos) or "Ninguno")
+    return revision
+
+
+def etapa_seguridad(estado: EstadoAuditoria) -> bool:
+    estado.es_seguro, estado.evidencia_seguridad = verificar_seguridad_documento(
+        estado.secciones, estado.llm, estado.pdf_visual
+    )
+    if estado.es_seguro:
+        log.info("Escaneo de seguridad superado. El documento está limpio.")
+    else:
+        log.critical("ALERTA DE SEGURIDAD: INYECCIÓN DE PROMPT DETECTADA. Evidencia: %s", estado.evidencia_seguridad)
+    return estado.es_seguro
+
+
+def etapa_grafo(estado: EstadoAuditoria) -> nx.MultiDiGraph:
+    estado.grafo = construir_grafo_conocimiento(
+        estado.secciones, estado.llm, estado.mapa_clausula_a_seccion,
+        cache_dir=estado.cache_dir, usar_cache=estado.usar_cache,
+    )
+    estado.indice_nodos_grafo = construir_indice_nodos_por_cid(estado.grafo)
+    try:
+        estado.ruta_grafo_png = visualizar_grafo(
+            estado.grafo, os.path.join(estado.cache_dir, f"grafo_{hash_secciones(estado.secciones)}.png")
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("No se pudo visualizar el grafo: %s", e)
+    return estado.grafo
+
+
+def etapa_agentes(estado: EstadoAuditoria, al_avanzar=None) -> list[dict]:
+    """Jurista, auditor y cronista sección por sección. `al_avanzar(hechas, total, n_hallazgos)` informa el progreso."""
+    jurista, auditor_ag, cronista = _crear_agentes(estado.llm, estado.str_idx_glob)
+    log.info(
+        "Iniciando auditoría en %d secciones (concurrencia=%d, contrato completo como referencia, PDF visual=%s)...",
+        len(estado.secciones), CFG.max_concurrencia_auditoria, "sí" if estado.pdf_visual else "no",
+    )
+    if not estado.usar_cache and estado.checkpoint_path and os.path.exists(estado.checkpoint_path):
+        os.remove(estado.checkpoint_path)
+    resultados = ejecutar(
+        _auditar_todas_async(
+            estado.secciones, estado.grafo, estado.indice_nodos_grafo, estado.mapa_clausula_a_seccion,
+            estado.llm, jurista, auditor_ag, cronista, estado.checkpoint_path, estado.referencia,
+            estado.pdf_visual, al_avanzar,
+        )
+    )
+    orden = {s["titulo"]: i for i, s in enumerate(estado.secciones)}
+    estado.resultados_auditoria = sorted(
+        (r for r in resultados if r.get("hallazgos")), key=lambda r: orden.get(r["seccion"], 999)
+    )
+    return estado.resultados_auditoria
+
+
+def etapa_sintesis(estado: EstadoAuditoria) -> dict | None:
+    estado.sintesis = ejecutar_sintesis_global(
+        estado.llm, estado.referencia, estado.resultados_auditoria or [], estado.str_idx_glob, estado.pdf_visual,
+        ruta_cache=os.path.join(estado.cache_dir, f"sintesis_{hash_secciones(estado.secciones)}.json"),
+        usar_cache=estado.usar_cache,
+    )
+    return estado.sintesis
+
+
 def ejecutar_auditoria_contrato(
     texto_contrato: str,
     llm: ClienteClaude,
@@ -344,91 +483,15 @@ def ejecutar_auditoria_contrato(
     usar_cache: bool | None = None,
     pdf_visual: str | None = None,
 ) -> dict:
-    cache_dir = cache_dir or CFG.cache_dir
-    if usar_cache is None:
-        usar_cache = CFG.usar_cache
-
-    # FASE 0: revisión de índices (y adaptación de formato si hace falta), antes de cualquier llamada al modelo.
-    texto_contrato, secciones, revision, cambios_formato = preparar_contrato(texto_contrato)
-    if cambios_formato:
-        os.makedirs(cache_dir, exist_ok=True)
-        ruta_normalizado = os.path.join(cache_dir, f"contrato_normalizado_{hash_secciones(secciones)}.txt")
-        with open(ruta_normalizado, "w", encoding="utf-8") as f:
-            f.write(texto_contrato)
-        log.info("Formato adaptado al estándar (%d cambios). Texto usado: %s", len(cambios_formato), ruta_normalizado)
-    if revision.estado == NO_RECONOCIDO:
-        log.critical("No se reconoció la estructura del contrato; se detiene antes de llamar al modelo.")
-        return {"abortado_por_formato": True, "revision_indices": revision.to_dict()}
-    for problema in revision.problemas:
-        log.warning("  Índices: %s", problema)
-
-    indice_secciones = crear_indice_capitulos_anexos(secciones)
-    indice_global_clausulas = crear_indice_global_clausulas(secciones)
-    mapa_clausula_a_seccion = construir_mapa_clausula_a_seccion(secciones)
-    nombres_anexos = [s["titulo"] for s in secciones if s["tipo"] == "ANEXO"]
-
-    log.info("ÍNDICE GLOBAL DE CLÁUSULAS: %s", ", ".join(indice_global_clausulas) or "Ninguna")
-    log.info("ANEXOS DETECTADOS: %s", ", ".join(nombres_anexos) or "Ninguno")
-
-    es_seguro, evidencia_maliciosa = verificar_seguridad_documento(secciones, llm, pdf_visual)
-    if not es_seguro:
-        log.critical("ALERTA DE SEGURIDAD: INYECCIÓN DE PROMPT DETECTADA. Evidencia: %s", evidencia_maliciosa)
-        return {"abortado_por_seguridad": True, "evidencia": evidencia_maliciosa}
-    log.info("Escaneo de seguridad superado. El documento está limpio.")
-
-    grafo_contrato = construir_grafo_conocimiento(
-        secciones, llm, mapa_clausula_a_seccion,
-        cache_dir=cache_dir, usar_cache=usar_cache,
+    estado = EstadoAuditoria(
+        llm=llm, cache_dir=cache_dir or CFG.cache_dir,
+        usar_cache=CFG.usar_cache if usar_cache is None else usar_cache, pdf_visual=pdf_visual,
     )
-    indice_nodos_grafo = construir_indice_nodos_por_cid(grafo_contrato)
-
-    ruta_grafo_png = None
-    try:
-        ruta_grafo_png = visualizar_grafo(
-            grafo_contrato, os.path.join(cache_dir, f"grafo_{hash_secciones(secciones)}.png")
-        )
-    except Exception as e:  # noqa: BLE001
-        log.warning("No se pudo visualizar el grafo: %s", e)
-
-    str_idx_glob = (
-        "CLÁUSULAS: " + (", ".join(indice_global_clausulas) or "Ninguna")
-        + " | ANEXOS: " + (", ".join(nombres_anexos) or "Ninguno")
-    )
-    jurista, auditor_ag, cronista = _crear_agentes(llm, str_idx_glob)
-    referencia = _referencia_contrato(secciones)
-
-    log.info(
-        "Iniciando auditoría en %d secciones (concurrencia=%d, contrato completo como referencia, PDF visual=%s)...",
-        len(secciones), CFG.max_concurrencia_auditoria, "sí" if pdf_visual else "no",
-    )
-
-    checkpoint_path = path_checkpoint_hallazgos(secciones, cache_dir)
-    resultados = ejecutar(
-        _auditar_todas_async(
-            secciones, grafo_contrato, indice_nodos_grafo, mapa_clausula_a_seccion,
-            llm, jurista, auditor_ag, cronista, checkpoint_path, referencia, pdf_visual,
-        )
-    )
-
-    resultados_auditoria = [r for r in resultados if r.get("hallazgos")]
-    orden = {s["titulo"]: i for i, s in enumerate(secciones)}
-    resultados_auditoria.sort(key=lambda r: orden.get(r["seccion"], 999))
-
-    sintesis = ejecutar_sintesis_global(
-        llm, referencia, resultados_auditoria, str_idx_glob, pdf_visual,
-        ruta_cache=os.path.join(cache_dir, f"sintesis_{hash_secciones(secciones)}.json"),
-        usar_cache=usar_cache,
-    )
-
-    return {
-        "secciones": secciones,
-        "indice_secciones": indice_secciones,
-        "indice_global_clausulas": indice_global_clausulas,
-        "mapa_clausula_a_seccion": mapa_clausula_a_seccion,
-        "resultados_auditoria": resultados_auditoria,
-        "revision_indices": revision.to_dict(),
-        "sintesis": sintesis,
-        "grafo": grafo_contrato,
-        "ruta_grafo_png": ruta_grafo_png,
-        "checkpoint_path": checkpoint_path,
-    }
+    if etapa_indices(estado, texto_contrato).estado == NO_RECONOCIDO:
+        return estado.resultado()
+    if not etapa_seguridad(estado):
+        return estado.resultado()
+    etapa_grafo(estado)
+    etapa_agentes(estado)
+    etapa_sintesis(estado)
+    return estado.resultado()

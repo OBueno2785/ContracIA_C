@@ -1,0 +1,16 @@
+[server]
+# Solo accesible desde este equipo: los contratos no deben quedar expuestos en la red.
+address = "localhost"
+port = 8501
+maxUploadSize = 200
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false
+serverAddress = "localhost"
+
+[theme]
+base = "light"
+primaryColor = "#1f3a5f"

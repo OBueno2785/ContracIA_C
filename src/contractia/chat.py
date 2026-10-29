@@ -121,16 +121,15 @@ INSTRUCCIONES_CHAT = (
 )
 
 
-def consultar_contrato_graphrag(
+def construir_consulta(
     pregunta_usuario: str,
     G: nx.MultiDiGraph,
     secciones: list[dict],
     indice_secciones: list[dict],
     indice_nodos_grafo: dict[str, list[str]],
-    llm: ClienteClaude,
     historial: list[tuple[str, str]] | None = None,
-    imprimir: bool = False,
 ) -> str:
+    """Mensaje para el modelo con solo el sub-grafo y los textos relacionados con la pregunta."""
     seeds = _seleccionar_nodos_seed(pregunta_usuario, G, indice_nodos_grafo, indice_secciones)
     nodos_relevantes = _ego_subgrafo(G, seeds, radius=2) if seeds else set()
     contexto_grafo = _resumen_subgrafo(G, nodos_relevantes)
@@ -142,7 +141,7 @@ def consultar_contrato_graphrag(
     if historial:
         historial_str = "\n".join([f"USER: {p}\nASSISTANT: {r}" for p, r in historial[-3:]])
 
-    contenido = (
+    return (
         f"<fecha_actual>{fecha_hoy}</fecha_actual>\n\n"
         f"<historial_reciente>\n{historial_str or '(sin historial)'}\n</historial_reciente>\n\n"
         f"<indice_contrato>\n{str_indice}\n</indice_contrato>\n\n"
@@ -151,6 +150,20 @@ def consultar_contrato_graphrag(
         f"<pregunta_usuario>\n{pregunta_usuario}\n</pregunta_usuario>"
     )
 
+
+def consultar_contrato_graphrag(
+    pregunta_usuario: str,
+    G: nx.MultiDiGraph,
+    secciones: list[dict],
+    indice_secciones: list[dict],
+    indice_nodos_grafo: dict[str, list[str]],
+    llm: ClienteClaude,
+    historial: list[tuple[str, str]] | None = None,
+    imprimir: bool = False,
+) -> str:
+    contenido = construir_consulta(
+        pregunta_usuario, G, secciones, indice_secciones, indice_nodos_grafo, historial
+    )
     partes: list[str] = []
     for fragmento in llm.texto_en_streaming("chat", INSTRUCCIONES_CHAT, contenido):
         partes.append(fragmento)

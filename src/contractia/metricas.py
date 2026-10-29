@@ -11,6 +11,14 @@ from .utils import extraer_cid_de_string
 
 _CAMPOS = ("calls", "input", "cache_write", "cache_read", "output")
 
+# USD por millón de tokens: entrada, salida, lectura de caché (octubre 2026). La escritura en caché cuesta 1,25× la entrada.
+PRECIOS_USD_MTOK: dict[str, tuple[float, float, float]] = {
+    "claude-fable-5-1": (10.0, 50.0, 0.25),
+    "claude-opus-5-5": (4.0, 20.0, 0.20),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.20),
+    "claude-haiku-5-5": (0.10, 0.50, 0.01),
+}
+
 
 class ContadorTokens:
     """Acumula tokens por etapa (agente o fase) a partir de `response.usage` de la API de Claude."""
@@ -29,6 +37,20 @@ class ContadorTokens:
             b["cache_write"] += getattr(usage, "cache_creation_input_tokens", 0) or 0
             b["cache_read"] += getattr(usage, "cache_read_input_tokens", 0) or 0
             b["output"] += getattr(usage, "output_tokens", 0) or 0
+
+    def costo_usd(self, modelo: str, etiqueta: str | None = None) -> float | None:
+        """Costo estimado (todas las etapas, o solo `etiqueta`). None si no hay precio para el modelo."""
+        precios = PRECIOS_USD_MTOK.get(modelo)
+        if precios is None:
+            return None
+        pi, po, pr = precios
+        cubos = [self.por_etiqueta[etiqueta]] if etiqueta in self.por_etiqueta else (
+            [] if etiqueta else list(self.por_etiqueta.values())
+        )
+        return sum(
+            (b["input"] * pi + b["cache_write"] * pi * 1.25 + b["cache_read"] * pr + b["output"] * po) / 1e6
+            for b in cubos
+        )
 
     def resumen(self) -> str:
         if not self.por_etiqueta: return "(sin uso registrado)"
