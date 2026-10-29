@@ -17,6 +17,7 @@ from .grafo import (
     obtener_contexto_grafo,
     visualizar_grafo,
 )
+from .indices import NO_RECONOCIDO, preparar_contrato
 from .llm import ClienteClaude, ejecutar
 from .logging_setup import get_logger
 from .models import (
@@ -30,7 +31,6 @@ from .segmentacion import (
     crear_indice_capitulos_anexos,
     crear_indice_de_clausulas_por_seccion,
     crear_indice_global_clausulas,
-    separar_en_secciones,
 )
 from .sintesis import ejecutar_sintesis_global
 from .utils import hash_secciones, path_checkpoint_hallazgos
@@ -348,7 +348,20 @@ def ejecutar_auditoria_contrato(
     if usar_cache is None:
         usar_cache = CFG.usar_cache
 
-    secciones = separar_en_secciones(texto_contrato)
+    # FASE 0: revisión de índices (y adaptación de formato si hace falta), antes de cualquier llamada al modelo.
+    texto_contrato, secciones, revision, cambios_formato = preparar_contrato(texto_contrato)
+    if cambios_formato:
+        os.makedirs(cache_dir, exist_ok=True)
+        ruta_normalizado = os.path.join(cache_dir, f"contrato_normalizado_{hash_secciones(secciones)}.txt")
+        with open(ruta_normalizado, "w", encoding="utf-8") as f:
+            f.write(texto_contrato)
+        log.info("Formato adaptado al estándar (%d cambios). Texto usado: %s", len(cambios_formato), ruta_normalizado)
+    if revision.estado == NO_RECONOCIDO:
+        log.critical("No se reconoció la estructura del contrato; se detiene antes de llamar al modelo.")
+        return {"abortado_por_formato": True, "revision_indices": revision.to_dict()}
+    for problema in revision.problemas:
+        log.warning("  Índices: %s", problema)
+
     indice_secciones = crear_indice_capitulos_anexos(secciones)
     indice_global_clausulas = crear_indice_global_clausulas(secciones)
     mapa_clausula_a_seccion = construir_mapa_clausula_a_seccion(secciones)
@@ -413,6 +426,7 @@ def ejecutar_auditoria_contrato(
         "indice_global_clausulas": indice_global_clausulas,
         "mapa_clausula_a_seccion": mapa_clausula_a_seccion,
         "resultados_auditoria": resultados_auditoria,
+        "revision_indices": revision.to_dict(),
         "sintesis": sintesis,
         "grafo": grafo_contrato,
         "ruta_grafo_png": ruta_grafo_png,

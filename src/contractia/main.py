@@ -88,7 +88,7 @@ def main(chat: bool = True) -> None:
 
     _save_report(md)
 
-    if not chat or resultado.get("abortado_por_seguridad"):
+    if not chat or resultado.get("abortado_por_seguridad") or resultado.get("abortado_por_formato"):
         return
 
     if "grafo" in resultado and "secciones" in resultado:

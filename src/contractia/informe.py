@@ -86,7 +86,43 @@ def render_sintesis_md(sintesis: dict[str, Any]) -> str:
     return "\n".join(md)
 
 
+_ESTADOS_INDICES = {
+    "OK": "✅ Índices completos",
+    "CON_OBSERVACIONES": "⚠️ Índices con observaciones",
+    "NO_RECONOCIDO": "⛔ Estructura no reconocida",
+}
+
+
+def render_revision_indices_md(rev: dict[str, Any]) -> str:
+    md = ["\n## Revisión de Índices"]
+    md.append(f"**{_ESTADOS_INDICES.get(rev.get('estado', ''), rev.get('estado', ''))}** — "
+              f"{len(rev.get('capitulos', []))} capítulos, {len(rev.get('anexos', []))} anexos, "
+              f"{rev.get('n_clausulas', 0)} cláusulas.")
+    if rev.get("normalizado"):
+        md.append(f"\nEl formato del contrato se adaptó al estándar ({rev.get('cambios_formato', 0)} cambios en "
+                  "encabezados y numeración) para poder reconocer su estructura. Ejemplos:")
+        for antes, despues in rev.get("ejemplos_cambios", [])[:8]:
+            md.append(f"- `{antes[:90]}` → `{despues[:90]}`")
+    if rev.get("capitulos"):
+        md.append("\n| Capítulo | Cláusulas | Faltantes |")
+        md.append("|---|---:|---|")
+        for c in rev["capitulos"]:
+            md.append(f"| {c['titulo']} | {c['n_clausulas']} | {', '.join(c['faltantes']) or '—'} |")
+    if rev.get("problemas"):
+        md.append("\n**Observaciones:**")
+        md.extend(f"- {p}" for p in rev["problemas"])
+    return "\n".join(md)
+
+
 def render_auditoria_markdown(resultado: dict[str, Any]) -> str:
+    if resultado.get("abortado_por_formato"):
+        return (
+            "# Informe de Auditoría Contractual\n\n"
+            "⛔ **AUDITORÍA DETENIDA: NO SE RECONOCIÓ LA ESTRUCTURA DEL CONTRATO**\n\n"
+            "No se detectaron capítulos con el formato 'Capítulo <número> <TÍTULO>', ni siquiera después de "
+            "intentar adaptar el formato. No se hizo ninguna llamada al modelo.\n"
+            + render_revision_indices_md(resultado.get("revision_indices", {}))
+        )
     if resultado.get("abortado_por_seguridad"):
         return (
             "# Informe de Auditoría Contractual\n\n"
@@ -114,6 +150,9 @@ def render_auditoria_markdown(resultado: dict[str, Any]) -> str:
     md.append(f"- **Total de Inconsistencias Detectadas**: {total_errores}")
     if resultado.get("paginas_visuales"):
         md.append(f"- **Páginas analizadas también como imagen (tablas/escaneos)**: {len(resultado['paginas_visuales'])}")
+
+    if resultado.get("revision_indices"):
+        md.append(render_revision_indices_md(resultado["revision_indices"]))
 
     if resultado.get("sintesis"):
         md.append(render_sintesis_md(resultado["sintesis"]))
