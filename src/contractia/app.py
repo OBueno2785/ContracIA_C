@@ -1,6 +1,7 @@
 """Interfaz web de ContractIA: subir el contrato y ejecutar el pipeline paso a paso.
 
 Ejecutar con:  streamlit run src/contractia/app.py
+El aspecto (colores, tipografía, radios) vive en .streamlit/config.toml.
 """
 from __future__ import annotations
 
@@ -28,19 +29,28 @@ from contractia.llm import ClienteClaude
 from contractia.logging_setup import setup_logger
 from contractia.metricas import calcular_metricas_grafo, render_metricas_grafo_md
 
-# Costo medido en la estimación de referencia (Opus 5.5, ~220.000 tokens): unos $38 por auditoría completa.
+# Estimación de referencia (Opus 5.5, ~220.000 tokens): unos $38 por auditoría completa,
+# repartidos así entre las etapas que usan el modelo.
 _USD_POR_1K_TOKENS_REF = 38 / 220
+_PARTE_DEL_COSTO = {"seguridad": 0.033, "grafo": 0.098, "agentes": 0.842, "sintesis": 0.027}
 
+# clave, nombre, descripción, usa el modelo, ícono
 ETAPAS = [
-    ("carga", "Cargar contrato", "Lee los PDF/DOCX y detecta las páginas con tablas o escaneadas.", False),
-    ("indices", "Revisión de índices", "Detecta capítulos, cláusulas y anexos; adapta el formato si hace falta.", False),
-    ("seguridad", "Escaneo de seguridad", "Busca instrucciones ocultas dirigidas a la IA en cada sección.", True),
-    ("grafo", "Grafo de conocimiento", "Extrae las relaciones entre cláusulas, plazos, roles y penalidades.", True),
-    ("agentes", "Auditoría por agentes", "Jurista, auditor y cronista revisan cada sección con el contrato como referencia.", True),
-    ("sintesis", "Síntesis global", "Revisión del contrato completo: problemas globales, ausencias y falsos positivos.", True),
-    ("informe", "Informe", "Genera el informe final en Markdown.", False),
+    ("carga", "Cargar contrato", "Lee los PDF/DOCX y detecta las páginas con tablas o escaneadas.", False, ":material/upload_file:"),
+    ("indices", "Revisión de índices", "Detecta capítulos, cláusulas y anexos antes de llamar al modelo; adapta el formato si hace falta.", False, ":material/format_list_numbered:"),
+    ("seguridad", "Escaneo de seguridad", "Busca instrucciones ocultas dirigidas a la IA en cada sección y en las páginas escaneadas.", True, ":material/shield:"),
+    ("grafo", "Grafo de conocimiento", "Extrae las relaciones entre cláusulas, plazos, roles y penalidades.", True, ":material/hub:"),
+    ("agentes", "Auditoría por agentes", "Jurista, auditor y cronista revisan cada sección con el contrato completo como referencia.", True, ":material/groups:"),
+    ("sintesis", "Síntesis global", "Revisión del contrato completo: problemas globales, ausencias y posibles falsos positivos.", True, ":material/summarize:"),
+    ("informe", "Informe", "Genera el informe final en Markdown, listo para descargar.", False, ":material/description:"),
 ]
-ICONOS = {"hecha": "✅", "actual": "▶️", "pendiente": "⏳", "bloqueada": "⛔"}
+ESTADO_VISUAL = {
+    # icono del paso, color del texto, badge
+    "hecha": (":green[:material/check_circle:]", "", ("Completada", ":material/check:", "green")),
+    "actual": (":blue[:material/radio_button_checked:]", "", ("Siguiente paso", ":material/arrow_forward:", "blue")),
+    "pendiente": (":gray[:material/radio_button_unchecked:]", "gray", ("Pendiente", ":material/schedule:", "gray")),
+    "bloqueada": (":red[:material/block:]", "gray", ("Bloqueada", ":material/block:", "red")),
+}
 SEVERIDADES = ["CRITICA", "ALTA", "MEDIA", "BAJA"]
 
 
@@ -75,6 +85,24 @@ def _estado_etapa(i: int) -> str:
 
 def _hay_credenciales() -> bool:
     return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"))
+
+
+def _miles(n: int) -> str:
+    return f"{n:,}".replace(",", ".")
+
+
+def _costo_total_estimado() -> float | None:
+    carga = st.session_state.carga
+    return carga["tokens_estimados"] / 1000 * _USD_POR_1K_TOKENS_REF if carga else None
+
+
+def _costo_etapa(clave: str) -> str:
+    total = _costo_total_estimado()
+    if clave not in _PARTE_DEL_COSTO:
+        return "Sin costo"
+    if total is None:
+        return "Usa el modelo"
+    return f"Usa el modelo · ≈ \\${max(total * _PARTE_DEL_COSTO[clave], 0.5):,.0f}"
 
 
 # ---------------------------------------------------------------- ejecución de etapas
@@ -154,95 +182,104 @@ def _armar_informe(estado: EstadoAuditoria) -> str:
     return md
 
 
-def _boton_ejecutar(i: int, deshabilitado: bool = False) -> None:
-    clave, nombre, _, usa_modelo = ETAPAS[i]
-    etiqueta = "Volver a ejecutar" if clave in st.session_state.hechas else "Ejecutar"
-    if usa_modelo and not _hay_credenciales():
-        st.caption("No se detectó ANTHROPIC_API_KEY; ingrésala en la barra lateral si la llamada falla.")
-    if st.button(f"{etiqueta}: {nombre}", key=f"btn_{clave}", type="primary", disabled=deshabilitado):
+def _boton_ejecutar(i: int) -> None:
+    clave, nombre, _, usa_modelo, icono = ETAPAS[i]
+    repetir = clave in st.session_state.hechas
+    with st.container(horizontal=True, vertical_alignment="center"):
+        pulsado = st.button(
+            f"{'Volver a ejecutar' if repetir else 'Ejecutar'}: {nombre}",
+            key=f"btn_{clave}", type="secondary" if repetir else "primary",
+            icon=":material/replay:" if repetir else icono,
+        )
+        if not repetir:
+            st.caption(_costo_etapa(clave))
+    if usa_modelo and not repetir and not _hay_credenciales():
+        st.caption(":orange[:material/key:] No se detectó ANTHROPIC_API_KEY; puedes ingresarla en la barra lateral.")
+    if pulsado:
         try:
             with st.spinner(f"Ejecutando {nombre.lower()}..."):
                 _ejecutar(i)
             st.rerun()
         except Exception as e:  # noqa: BLE001
-            st.error(f"La etapa falló: {e}")
+            st.error(str(e), title=f"Falló «{nombre}»", icon=":material/error:")
 
 
 # ---------------------------------------------------------------- vistas de resultados
 def _vista_carga() -> None:
     c = st.session_state.carga
-    col = st.columns(4)
-    col[0].metric("Archivos", len(c["archivos"]))
-    col[1].metric("Páginas", f"{c['paginas']:,}")
-    col[2].metric("Palabras", f"{c['palabras']:,}")
-    col[3].metric("Tokens (aprox.)", f"{c['tokens_estimados']:,}")
-    st.caption(" · ".join(c["archivos"]))
+    cols = st.columns(4)
+    cols[0].metric("Archivos", len(c["archivos"]), border=True)
+    cols[1].metric("Páginas", _miles(c["paginas"]), border=True)
+    cols[2].metric("Palabras", _miles(c["palabras"]), border=True)
+    cols[3].metric("Tokens (aprox.)", _miles(c["tokens_estimados"]), border=True)
+    st.caption(":material/attach_file: " + " · ".join(c["archivos"]))
     if c["paginas_visuales"]:
-        with st.expander(f"{len(c['paginas_visuales'])} páginas se enviarán también como imagen (tablas o escaneos)"):
-            st.write(", ".join(c["paginas_visuales"]))
-    costo = c["tokens_estimados"] / 1000 * _USD_POR_1K_TOKENS_REF
-    st.info(
-        f"Costo estimado de la auditoría completa con Opus 5.5: **\\${costo * 0.7:,.0f} – \\${costo * 1.4:,.0f}**. "
-        "La revisión de índices es gratuita; el costo empieza en el escaneo de seguridad."
-    )
+        with st.expander(f"{len(c['paginas_visuales'])} páginas se enviarán también como imagen (tablas o escaneos)",
+                         icon=":material/table_view:"):
+            st.caption(", ".join(c["paginas_visuales"]))
 
 
 def _vista_indices() -> None:
-    rev = st.session_state.estado.revision
-    texto_estado = {OK: st.success, NO_RECONOCIDO: st.error}.get(rev.estado, st.warning)
-    texto_estado({
-        OK: "Índices completos.",
-        NO_RECONOCIDO: "No se reconoció la estructura del contrato. La auditoría no puede continuar.",
-    }.get(rev.estado, "Índices con observaciones: revísalas antes de continuar."))
-    col = st.columns(3)
-    col[0].metric("Capítulos", len(rev.capitulos))
-    col[1].metric("Anexos", len(rev.anexos))
-    col[2].metric("Cláusulas", rev.n_clausulas)
+    estado = st.session_state.estado
+    rev = estado.revision
+    if rev.estado == NO_RECONOCIDO:
+        st.error("No se detectaron capítulos con el formato «Capítulo <número> <TÍTULO>», ni siquiera tras adaptar "
+                 "el formato. No se llamó al modelo.", title="Estructura no reconocida", icon=":material/error:")
+    cols = st.columns(3)
+    cols[0].metric("Capítulos", len(rev.capitulos), border=True)
+    cols[1].metric("Anexos", len(rev.anexos), border=True)
+    cols[2].metric("Cláusulas", rev.n_clausulas, border=True)
     if rev.normalizado:
-        st.info(f"El formato se adaptó al estándar ({rev.cambios_formato} cambios en encabezados y numeración).")
-        with st.expander("Ver cambios de formato"):
-            st.dataframe(
-                [{"Antes": a, "Después": d} for a, d in st.session_state.estado.cambios_formato],
-                width="stretch", hide_index=True,
-            )
-            st.download_button("Descargar texto adaptado", st.session_state.estado.texto,
-                               file_name="contrato_normalizado.txt")
+        st.info(f"El formato se adaptó al estándar ({rev.cambios_formato} cambios en encabezados y numeración).",
+                icon=":material/auto_fix_high:")
+        with st.expander("Ver cambios de formato", icon=":material/compare_arrows:"):
+            st.dataframe([{"Antes": a, "Después": d} for a, d in estado.cambios_formato], hide_index=True,
+                         alt="Cambios de formato aplicados al contrato")
+            st.download_button("Descargar texto adaptado", estado.texto, file_name="contrato_normalizado.txt",
+                               icon=":material/download:")
     if rev.problemas:
-        with st.expander(f"Observaciones ({len(rev.problemas)})", expanded=rev.estado != OK):
+        with st.expander(f"Observaciones ({len(rev.problemas)})", expanded=rev.estado != OK, icon=":material/warning:"):
             for p in rev.problemas:
                 st.markdown(f"- {p}")
     if rev.capitulos:
-        with st.expander("Capítulos y cláusulas detectados"):
-            st.dataframe(
-                [{"Capítulo": c["titulo"], "Cláusulas": c["n_clausulas"], "Faltantes": ", ".join(c["faltantes"])}
-                 for c in rev.capitulos],
-                width="stretch", hide_index=True,
-            )
+        maximo = max(c["n_clausulas"] for c in rev.capitulos) or 1
+        st.dataframe(
+            [{"N.º": c["n"], "Capítulo": c["titulo"].split(" ", 2)[-1].capitalize(), "Cláusulas": c["n_clausulas"],
+              "Faltantes": ", ".join(c["faltantes"]) or "—"} for c in rev.capitulos],
+            hide_index=True, height=min(38 * (len(rev.capitulos) + 1) + 2, 420),
+            column_config={
+                "N.º": st.column_config.TextColumn(width="small"),
+                "Cláusulas": st.column_config.ProgressColumn(format="%d", min_value=0, max_value=maximo),
+            },
+            alt="Capítulos detectados con su número de cláusulas",
+        )
     if rev.anexos:
-        with st.expander("Anexos detectados"):
-            st.write("\n".join(f"- {a['titulo']}" for a in rev.anexos))
+        with st.expander(f"Anexos detectados ({len(rev.anexos)})", icon=":material/folder_open:"):
+            st.markdown("\n".join(f"- {a['titulo']}" for a in rev.anexos))
 
 
 def _vista_seguridad() -> None:
     e = st.session_state.estado
     if e.es_seguro:
-        st.success("Documento limpio: no se encontraron instrucciones ocultas.")
+        st.success("No se encontraron instrucciones ocultas en el texto ni en las páginas escaneadas.",
+                   title="Documento limpio", icon=":material/verified_user:")
     else:
-        st.error(f"Alerta de seguridad. La auditoría se detuvo.\n\n**Evidencia:** {e.evidencia_seguridad}")
+        st.error(e.evidencia_seguridad, title="Alerta de seguridad: la auditoría se detuvo", icon=":material/gpp_bad:")
 
 
 def _vista_grafo() -> None:
     e = st.session_state.estado
     m = calcular_metricas_grafo(e.grafo, e.mapa_clausula_a_seccion)
-    col = st.columns(4)
-    col[0].metric("Nodos", f"{m['n_nodos']:,}")
-    col[1].metric("Relaciones", f"{m['n_aristas']:,}")
-    col[2].metric("Cobertura de cláusulas", f"{m['cobertura_pct']}%")
-    col[3].metric("Cláusulas inventadas", m["n_inventadas"])
+    cols = st.columns(4)
+    cols[0].metric("Nodos", _miles(m["n_nodos"]), border=True)
+    cols[1].metric("Relaciones", _miles(m["n_aristas"]), border=True)
+    cols[2].metric("Cobertura de cláusulas", f"{m['cobertura_pct']}%", border=True)
+    cols[3].metric("Cláusulas inventadas", m["n_inventadas"], border=True)
     if e.ruta_grafo_png and os.path.exists(e.ruta_grafo_png):
-        st.image(e.ruta_grafo_png, width="stretch")
+        with st.expander("Ver el grafo", icon=":material/hub:"):
+            st.image(e.ruta_grafo_png, width="stretch", alt="Grafo de conocimiento del contrato")
     if m["distribucion_relaciones"]:
-        with st.expander("Relaciones por tipo"):
+        with st.expander("Relaciones por tipo", icon=":material/bar_chart:"):
             st.bar_chart(m["distribucion_relaciones"], horizontal=True)
 
 
@@ -257,43 +294,48 @@ def _filas_hallazgos(resultados: list[dict]) -> list[dict]:
 def _vista_agentes() -> None:
     filas = _filas_hallazgos(st.session_state.estado.resultados_auditoria or [])
     conteo = Counter(f["Severidad"] for f in filas)
-    col = st.columns(5)
-    col[0].metric("Hallazgos", len(filas))
-    for c, sev in zip(col[1:], SEVERIDADES, strict=True):
-        c.metric(sev.capitalize(), conteo.get(sev, 0))
+    cols = st.columns(5)
+    cols[0].metric("Hallazgos", len(filas), border=True)
+    for c, sev in zip(cols[1:], SEVERIDADES, strict=True):
+        c.metric(sev.capitalize(), conteo.get(sev, 0), border=True)
     if filas:
-        sel = st.multiselect("Severidad", SEVERIDADES, default=SEVERIDADES, key="filtro_sev")
+        sel = st.pills("Severidad", SEVERIDADES, selection_mode="multi", default=SEVERIDADES, key="filtro_sev",
+                       format_func=str.capitalize)
         st.dataframe([f for f in filas if f["Severidad"] in sel or f["Severidad"] not in SEVERIDADES],
-                     width="stretch", hide_index=True)
+                     hide_index=True, alt="Hallazgos de los agentes por sección")
 
 
 def _vista_sintesis() -> None:
     s = st.session_state.estado.sintesis
     if not s:
-        st.warning("La síntesis global no se pudo generar; revisa el log.")
+        st.warning("La síntesis global no se pudo generar; revisa el log.", icon=":material/warning:")
         return
-    st.markdown(s.get("resumen_ejecutivo", ""))
-    for clave, titulo in [("hallazgos_globales", "Hallazgos globales"), ("ausencias", "Elementos ausentes o incompletos")]:
+    with st.container(border=True):
+        st.markdown("**:material/summarize: Resumen ejecutivo**")
+        st.markdown(s.get("resumen_ejecutivo", ""))
+    for clave, titulo, icono in [("hallazgos_globales", "Hallazgos globales", ":material/travel_explore:"),
+                                 ("ausencias", "Elementos ausentes o incompletos", ":material/rule:")]:
         items = s.get(clave) or []
-        with st.expander(f"{titulo} ({len(items)})", expanded=bool(items)):
+        with st.expander(f"{titulo} ({len(items)})", expanded=bool(items), icon=icono):
             if items:
                 st.dataframe(
                     [{"Cláusula": h.get("clausula_afectada"), "Tipo": h.get("tipo"), "Severidad": h.get("severidad"),
                       "Problema": h.get("explicacion"), "Cita": h.get("cita")} for h in items],
-                    width="stretch", hide_index=True,
+                    hide_index=True, alt=titulo,
                 )
             else:
                 st.caption("Sin elementos.")
     observados = s.get("hallazgos_observados") or []
     if observados:
-        with st.expander(f"Posibles duplicados o falsos positivos ({len(observados)})"):
-            st.dataframe(observados, width="stretch", hide_index=True)
+        with st.expander(f"Posibles duplicados o falsos positivos ({len(observados)})", icon=":material/flaky:"):
+            st.dataframe(observados, hide_index=True, alt="Hallazgos observados por la síntesis")
 
 
 def _vista_informe() -> None:
     md = st.session_state.informe_md
-    st.download_button("Descargar informe (.md)", md, file_name="informe_auditoria_contrato.md", type="primary")
-    with st.expander("Vista previa", expanded=True):
+    st.download_button("Descargar informe (.md)", md, file_name="informe_auditoria_contrato.md", type="primary",
+                       icon=":material/download:")
+    with st.expander("Vista previa del informe", icon=":material/visibility:"):
         st.markdown(md)
 
 
@@ -303,100 +345,189 @@ VISTAS = {
 }
 
 
+def _resumen_etapa(clave: str) -> str:
+    """Una línea con el resultado de una etapa completada (se muestra en la tarjeta plegada)."""
+    e: EstadoAuditoria | None = st.session_state.estado
+    c = st.session_state.carga
+    if clave == "carga":
+        return f"{' · '.join(c['archivos'])} · {_miles(c['paginas'])} páginas · {len(c['paginas_visuales'])} con tablas o escaneadas"
+    if clave == "indices":
+        r = e.revision
+        return f"{len(r.capitulos)} capítulos · {len(r.anexos)} anexos · {r.n_clausulas} cláusulas"
+    if clave == "seguridad":
+        return "Documento limpio" if e.es_seguro else "Alerta de seguridad"
+    if clave == "grafo":
+        return f"{_miles(e.grafo.number_of_nodes())} nodos · {_miles(e.grafo.number_of_edges())} relaciones"
+    if clave == "agentes":
+        return f"{len(_filas_hallazgos(e.resultados_auditoria or []))} hallazgos"
+    if clave == "sintesis":
+        s = e.sintesis or {}
+        return f"{len(s.get('hallazgos_globales') or [])} hallazgos globales · {len(s.get('ausencias') or [])} ausencias"
+    return "Informe listo para descargar"
+
+
 # ---------------------------------------------------------------- página
 def _barra_lateral() -> None:
     with st.sidebar:
-        st.markdown("### Progreso")
-        for i, (_, nombre, _, _) in enumerate(ETAPAS):
-            st.markdown(f"{ICONOS[_estado_etapa(i)]} {i + 1}. {nombre}")
-        st.divider()
-        st.markdown(f"**Modelo:** `{CFG.modelo}`")
-        if _hay_credenciales():
-            st.caption("API key detectada en el entorno (.env).")
-        else:
-            clave = st.text_input("ANTHROPIC_API_KEY", type="password",
-                                  help="Solo se usa en esta sesión; no se guarda en disco.")
-            if clave:
-                os.environ["ANTHROPIC_API_KEY"] = clave
-                st.rerun()
-        llm: ClienteClaude = st.session_state.llm
-        costo = llm.tokens.costo_usd(CFG.modelo)
-        st.metric("Costo acumulado", f"${costo:,.2f}" if costo is not None else "n/d")
-        if llm.tokens.por_etiqueta:
-            with st.expander("Tokens por etapa"):
-                st.dataframe(
-                    [{"Etapa": k, "Llamadas": v["calls"], "Entrada": v["input"], "Caché (lectura)": v["cache_read"],
-                      "Salida": v["output"], "USD": round(llm.tokens.costo_usd(CFG.modelo, k) or 0, 2)}
-                     for k, v in sorted(llm.tokens.por_etiqueta.items())],
-                    hide_index=True,
-                )
-        st.divider()
-        if st.button("Nueva auditoría", width="stretch"):
+        hechas = len(st.session_state.hechas)
+        st.subheader("Progreso")
+        st.progress(hechas / len(ETAPAS), text=f"{hechas} de {len(ETAPAS)} etapas completadas")
+        for i, (clave, nombre, _, usa_modelo, _) in enumerate(ETAPAS):
+            est = _estado_etapa(i)
+            icono, color, _ = ESTADO_VISUAL[est]
+            texto = f"**{i + 1}. {nombre}**" if est == "actual" else f"{i + 1}. {nombre}"
+            if color:
+                texto = f":{color}[{texto}]"
+            st.markdown(f"{icono} {texto}  \n:gray[{'usa el modelo' if usa_modelo else 'sin costo'}]")
+
+        c = st.session_state.carga
+        if c:
+            with st.container(border=True):
+                st.markdown(":material/picture_as_pdf: **Contrato**")
+                st.caption(" · ".join(c["archivos"]))
+                cols = st.columns(2)
+                cols[0].metric("Páginas", _miles(c["paginas"]))
+                cols[1].metric("Con tablas", len(c["paginas_visuales"]))
+        if st.button("Nueva auditoría", icon=":material/restart_alt:", width="stretch"):
             _reiniciar()
             st.rerun()
 
+        llm: ClienteClaude = st.session_state.llm
+        if llm.tokens.por_etiqueta:
+            with st.expander("Tokens por etapa", icon=":material/receipt_long:"):
+                st.dataframe(
+                    [{"Etapa": k, "Llamadas": v["calls"], "Entrada": v["input"], "Caché": v["cache_read"],
+                      "Salida": v["output"], "USD": round(llm.tokens.costo_usd(CFG.modelo, k) or 0, 2)}
+                     for k, v in sorted(llm.tokens.por_etiqueta.items())],
+                    hide_index=True, alt="Uso de tokens y costo por etapa",
+                )
+        if not _hay_credenciales():
+            with st.expander("Configurar API key", icon=":material/key:", expanded=True):
+                clave = st.text_input("ANTHROPIC_API_KEY", type="password",
+                                      help="Solo se usa en esta sesión; no se guarda en disco.")
+                if clave:
+                    os.environ["ANTHROPIC_API_KEY"] = clave
+                    st.rerun()
+
+
+def _encabezado() -> None:
+    with st.container(horizontal=True, vertical_alignment="center"):
+        with st.container():
+            st.title("ContractIA", icon=":material/balance:")
+            st.caption("Auditoría de contratos con agentes especializados, grafo de conocimiento y Claude.")
+        with st.container(horizontal=True, horizontal_alignment="right", vertical_alignment="center"):
+            if _hay_credenciales():
+                st.badge("API key conectada", icon=":material/check_circle:", color="green")
+            else:
+                st.badge("Sin API key", icon=":material/key_off:", color="orange")
+            st.badge(CFG.modelo, icon=":material/memory:", color="gray")
+            costo = st.session_state.llm.tokens.costo_usd(CFG.modelo)
+            st.metric("Costo acumulado", f"${costo:,.2f}" if costo is not None else "n/d", width="content")
+
 
 def _paso_carga() -> None:
-    hecha = "carga" in st.session_state.hechas
-    if not hecha:
-        origen = st.radio("Origen", ["Subir archivos", "Carpeta local"], horizontal=True, label_visibility="collapsed")
-        usar_cache = st.checkbox("Reutilizar resultados guardados en caché (grafo, hallazgos, síntesis)", value=True)
-        if origen == "Subir archivos":
-            archivos = st.file_uploader("Contrato (PDF o DOCX; puede ser más de un archivo)",
-                                        type=["pdf", "docx"], accept_multiple_files=True)
-            carpeta = None
-        else:
-            carpeta = st.text_input("Carpeta con el contrato", value=CFG.ruta_contrato)
-            archivos = None
-        if st.button("Cargar contrato", type="primary", disabled=not (archivos or carpeta)):
-            try:
-                with st.spinner("Leyendo el contrato y detectando páginas con tablas..."):
-                    _correr_carga(_guardar_subidos(archivos) if archivos else carpeta, usar_cache)
-                st.session_state.hechas.add("carga")
-                st.rerun()
-            except Exception as e:  # noqa: BLE001
-                st.error(f"No se pudo cargar el contrato: {e}")
+    origen = st.segmented_control("Origen del contrato", ["Subir archivos", "Carpeta local"], default="Subir archivos",
+                                  key="origen", required=True, label_visibility="collapsed")
+    if origen == "Carpeta local":
+        carpeta = st.text_input("Carpeta con el contrato", value=CFG.ruta_contrato)
+        archivos = None
     else:
-        VISTAS["carga"]()
+        archivos = st.file_uploader("Contrato (PDF o DOCX; puede ser más de un archivo)",
+                                    type=["pdf", "docx"], accept_multiple_files=True)
+        carpeta = None
+    usar_cache = st.toggle("Reutilizar resultados guardados en caché (grafo, hallazgos, síntesis)", value=True)
+    if st.button("Cargar contrato", type="primary", icon=":material/upload_file:", disabled=not (archivos or carpeta)):
+        try:
+            with st.spinner("Leyendo el contrato y detectando páginas con tablas (puede tardar un par de minutos)..."):
+                _correr_carga(_guardar_subidos(archivos) if archivos else carpeta, usar_cache)
+            st.session_state.hechas.add("carga")
+            st.rerun()
+        except Exception as e:  # noqa: BLE001
+            st.error(str(e), title="No se pudo cargar el contrato", icon=":material/error:")
+
+
+def _cabecera_etapa(i: int, est: str) -> None:
+    clave, nombre, descripcion, _, icono = ETAPAS[i]
+    etiqueta, icono_badge, color = ESTADO_VISUAL[est][2]
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.markdown(f"#### {icono} {i + 1} · {nombre}")
+        st.badge(etiqueta, icon=icono_badge, color=color)
+    st.caption(_resumen_etapa(clave) if est == "hecha" else descripcion)
 
 
 def _pestana_auditoria() -> None:
-    for i, (clave, nombre, descripcion, usa_modelo) in enumerate(ETAPAS):
+    hechas = [i for i in range(len(ETAPAS)) if _estado_etapa(i) == "hecha"]
+    ultima_hecha = hechas[-1] if hechas else None
+
+    if st.session_state.carga:
+        with st.container(horizontal=True, vertical_alignment="bottom"):
+            with st.container():
+                st.caption("Auditoría en curso")
+                st.subheader(" · ".join(st.session_state.carga["archivos"]))
+            total = _costo_total_estimado()
+            st.metric("Costo estimado de la auditoría completa", f"\\${total * 0.7:,.0f} – \\${total * 1.4:,.0f}",
+                      border=True, width="content", help="Estimación con Opus 5.5 a partir del tamaño del contrato.")
+
+    pendientes_vistos = False
+    for i, (clave, _, _, _, _) in enumerate(ETAPAS):
         est = _estado_etapa(i)
+        if est in ("pendiente", "bloqueada"):
+            pendientes_vistos = True
+            continue
         with st.container(border=True):
-            cabecera = f"{ICONOS[est]} **{i + 1}. {nombre}**" + (" · usa el modelo" if usa_modelo else " · sin costo")
-            st.markdown(cabecera)
-            st.caption(descripcion)
-            if clave == "carga":
+            _cabecera_etapa(i, est)
+            if clave == "carga" and est != "hecha":
                 _paso_carga()
                 continue
             if est == "hecha":
-                VISTAS[clave]()
-                if st.session_state.bloqueo in (None, i):
-                    _boton_ejecutar(i)
+                repetible = clave != "carga" and st.session_state.bloqueo in (None, i)
+                if i == ultima_hecha:
+                    VISTAS[clave]()
+                    if repetible:
+                        _boton_ejecutar(i)
+                else:
+                    with st.expander("Ver detalle", icon=":material/unfold_more:"):
+                        VISTAS[clave]()
+                        if repetible:
+                            _boton_ejecutar(i)
             elif est == "actual":
                 _boton_ejecutar(i)
-            elif est == "bloqueada":
-                st.caption("Bloqueada por el resultado de una etapa anterior.")
+
+    if pendientes_vistos:
+        with st.container(border=True):
+            for i, (clave, nombre, descripcion, _, icono) in enumerate(ETAPAS):
+                est = _estado_etapa(i)
+                if est not in ("pendiente", "bloqueada"):
+                    continue
+                with st.container(horizontal=True, horizontal_alignment="distribute", vertical_alignment="center"):
+                    with st.container(gap="xxsmall"):
+                        st.markdown(f"{ESTADO_VISUAL[est][0]} **{i + 1} · {nombre}**")
+                        st.caption(descripcion)
+                    st.caption("Bloqueada" if est == "bloqueada" else _costo_etapa(clave).replace("Usa el modelo · ", ""),
+                               width="content")
 
     pendientes = [i for i in range(1, len(ETAPAS)) if _estado_etapa(i) in ("actual", "pendiente")]
-    hay_restantes = "carga" in st.session_state.hechas and pendientes and st.session_state.bloqueo is None
-    if hay_restantes and st.button(f"Ejecutar las {len(pendientes)} etapas restantes", width="stretch"):
-        try:
-            for i in pendientes:
-                with st.spinner(f"{ETAPAS[i][1]}..."):
-                    _ejecutar(i)
-                if st.session_state.bloqueo is not None:
-                    break
-            st.rerun()
-        except Exception as e:  # noqa: BLE001
-            st.error(f"La ejecución se detuvo en «{ETAPAS[i][1]}»: {e}")
+    if "carga" in st.session_state.hechas and len(pendientes) > 1 and st.session_state.bloqueo is None:
+        with st.container(border=True, horizontal=True, horizontal_alignment="distribute", vertical_alignment="center"):
+            with st.container(gap="xxsmall"):
+                st.markdown("**¿Prefieres correr todo de una vez?**")
+                st.caption(f"Las {len(pendientes)} etapas restantes se ejecutan en orden y se detienen ante una alerta.")
+            if st.button(f"Ejecutar las {len(pendientes)} etapas restantes", icon=":material/fast_forward:"):
+                try:
+                    for i in pendientes:
+                        with st.spinner(f"{ETAPAS[i][1]}..."):
+                            _ejecutar(i)
+                        if st.session_state.bloqueo is not None:
+                            break
+                    st.rerun()
+                except Exception as e:  # noqa: BLE001
+                    st.error(str(e), title=f"La ejecución se detuvo en «{ETAPAS[i][1]}»", icon=":material/error:")
 
 
 def _pestana_chat() -> None:
     e: EstadoAuditoria | None = st.session_state.estado
     if e is None or e.grafo is None:
-        st.info("El chat se habilita cuando el grafo de conocimiento (etapa 4) está construido.")
+        st.info("El chat se habilita cuando el grafo de conocimiento (etapa 4) está construido.", icon=":material/lock:")
         return
     st.caption("Las respuestas se basan solo en las partes del contrato relacionadas con la pregunta.")
     for rol, texto in st.session_state.chat:
@@ -414,17 +545,16 @@ def _pestana_chat() -> None:
                 respuesta = st.write_stream(e.llm.texto_en_streaming("chat", INSTRUCCIONES_CHAT, contenido))
             except Exception as ex:  # noqa: BLE001
                 respuesta = f"No se pudo responder: {ex}"
-                st.error(respuesta)
+                st.error(respuesta, icon=":material/error:")
         st.session_state.chat += [("user", pregunta), ("assistant", respuesta)]
 
 
 def main() -> None:
-    st.set_page_config(page_title="ContractIA", page_icon="⚖️", layout="wide")
+    st.set_page_config(page_title="ContractIA", page_icon=":material/balance:", layout="wide")
     _iniciar_sesion()
-    st.title("ContractIA")
-    st.caption("Auditoría de contratos con agentes especializados, grafo de conocimiento y Claude.")
     _barra_lateral()
-    tab_auditoria, tab_chat = st.tabs(["Auditoría paso a paso", "Chat sobre el contrato"])
+    _encabezado()
+    tab_auditoria, tab_chat = st.tabs([":material/fact_check: Auditoría", ":material/forum: Chat sobre el contrato"])
     with tab_auditoria:
         _pestana_auditoria()
     with tab_chat:

@@ -11,6 +11,43 @@ toolbarMode = "minimal"
 gatherUsageStats = false
 serverAddress = "localhost"
 
+# Tema "legal-financiero": azul marino sobre blanco, barra lateral gris, IBM Plex.
 [theme]
 base = "light"
-primaryColor = "#1f3a5f"
+primaryColor = "#1F3A5F"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F7FA"
+textColor = "#0F1B2D"
+borderColor = "#E4E7EC"
+linkColor = "#1F3A5F"
+codeBackgroundColor = "#F2F4F7"
+font = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+headingFont = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@600;700&display=swap"
+codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
+baseFontSize = 15
+headingFontSizes = ["30px", "22px", "17px", "15px", "14px", "13px"]
+headingFontWeights = [700, 700, 600, 600, 600, 600]
+metricValueFontSize = "1.75rem"
+metricValueFontWeight = 600
+baseRadius = "10px"
+buttonRadius = "8px"
+showWidgetBorder = true
+showSidebarBorder = true
+linkUnderline = false
+greenColor = "#067647"
+orangeColor = "#B54708"
+redColor = "#B42318"
+blueColor = "#1F3A5F"
+grayColor = "#667085"
+dataframeHeaderBackgroundColor = "#F9FAFB"
+dataframeBorderColor = "#EAECF0"
+chartCategoricalColors = ["#1F3A5F", "#0E7090", "#B54708", "#067647", "#6941C6", "#B42318", "#667085"]
+paddingTop = "1.5rem"
+
+[theme.sidebar]
+backgroundColor = "#F5F7FA"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#0F1B2D"
+borderColor = "#E4E7EC"
+primaryColor = "#1F3A5F"
+linkColor = "#1F3A5F"

@@ -81,6 +81,19 @@ def _sin_errores(at):
     assert not [e.value for e in at.error], [e.value for e in at.error]
 
 
+_ICONO_A_ESTADO = {
+    ":green[:material/check_circle:]": "hecha",
+    ":blue[:material/radio_button_checked:]": "actual",
+    ":gray[:material/radio_button_unchecked:]": "pendiente",
+    ":red[:material/block:]": "bloqueada",
+}
+
+
+def _progreso(at) -> list[str]:
+    """Estado de cada etapa según el ícono de la barra lateral."""
+    return [estado for m in at.sidebar.markdown for icono, estado in _ICONO_A_ESTADO.items() if m.value.startswith(icono)]
+
+
 def test_recorrido_completo(contrato):
     from streamlit.testing.v1 import AppTest
 
@@ -88,7 +101,7 @@ def test_recorrido_completo(contrato):
     at.run()
     _sin_errores(at)
 
-    at.radio[0].set_value("Carpeta local").run()
+    at.segmented_control(key="origen").set_value("Carpeta local").run()
     at.text_input[0].set_value(contrato).run()
     next(b for b in at.button if b.label == "Cargar contrato").click().run()
     _sin_errores(at)
@@ -101,8 +114,8 @@ def test_recorrido_completo(contrato):
 
     next(b for b in at.button if b.label.startswith("Ejecutar las")).click().run()
     _sin_errores(at)
-    progreso = [m.value for m in at.sidebar.markdown if m.value[:1] in "✅▶⏳⛔"]
-    assert all(p.startswith("✅") for p in progreso), progreso
+    progreso = _progreso(at)
+    assert progreso == ["hecha"] * 7, progreso
     assert any("Resumen ejecutivo de prueba" in m.value for m in at.markdown)
     assert {m.label: m.value for m in at.metric}["Costo acumulado"] != "$0.00"
 
@@ -111,5 +124,5 @@ def test_recorrido_completo(contrato):
     assert any("remite a la 1.2" in m.value for m in at.markdown)
 
     at.button(key="btn_indices").click().run()
-    progreso = [m.value for m in at.sidebar.markdown if m.value[:1] in "✅▶⏳⛔"]
-    assert progreso[2].startswith("▶") and progreso[3].startswith("⏳")
+    progreso = _progreso(at)
+    assert progreso[:4] == ["hecha", "hecha", "actual", "pendiente"], progreso
