@@ -225,10 +225,13 @@ def _vista_indices() -> None:
     if rev.estado == NO_RECONOCIDO:
         st.error("No se detectaron capítulos con el formato «Capítulo <número> <TÍTULO>», ni siquiera tras adaptar "
                  "el formato. No se llamó al modelo.", title="Estructura no reconocida", icon=":material/error:")
-    cols = st.columns(3)
+    cols = st.columns(4)
     cols[0].metric("Capítulos", len(rev.capitulos), border=True)
     cols[1].metric("Anexos", len(rev.anexos), border=True)
-    cols[2].metric("Cláusulas", rev.n_clausulas, border=True)
+    cols[2].metric("Cláusulas", rev.n_primer_nivel, border=True,
+                   help="Primer nivel: 1.1, 3.5… (número del capítulo y un número más).")
+    cols[3].metric("Subcláusulas", rev.n_subniveles, border=True,
+                   help="Segundo nivel o más: 1.1.2, 2.1.4…")
     if rev.normalizado:
         st.info(f"El formato se adaptó al estándar ({rev.cambios_formato} cambios en encabezados y numeración).",
                 icon=":material/auto_fix_high:")
@@ -242,14 +245,18 @@ def _vista_indices() -> None:
             for p in rev.problemas:
                 st.markdown(f"- {p}")
     if rev.capitulos:
-        maximo = max(c["n_clausulas"] for c in rev.capitulos) or 1
+        maximo = max(c["n_primer_nivel"] for c in rev.capitulos) or 1
         st.dataframe(
-            [{"N.º": c["n"], "Capítulo": c["titulo"].split(" ", 2)[-1].capitalize(), "Cláusulas": c["n_clausulas"],
+            [{"N.º": c["n"], "Capítulo": c["titulo"].split(" ", 2)[-1].capitalize(),
+              "Cláusulas": c["n_primer_nivel"], "Subcláusulas": c["n_subniveles"],
               "Faltantes": ", ".join(c["faltantes"]) or "—"} for c in rev.capitulos],
             hide_index=True, height=min(38 * (len(rev.capitulos) + 1) + 2, 420),
             column_config={
                 "N.º": st.column_config.TextColumn(width="small"),
-                "Cláusulas": st.column_config.ProgressColumn(format="%d", min_value=0, max_value=maximo),
+                "Cláusulas": st.column_config.ProgressColumn(
+                    format="%d", min_value=0, max_value=maximo, help="Primer nivel: 1.1, 3.5…"),
+                "Subcláusulas": st.column_config.NumberColumn(
+                    width="small", help="Segundo nivel o más: 1.1.2, 2.1.4…"),
             },
             alt="Capítulos detectados con su número de cláusulas",
         )
@@ -353,7 +360,8 @@ def _resumen_etapa(clave: str) -> str:
         return f"{' · '.join(c['archivos'])} · {_miles(c['paginas'])} páginas · {len(c['paginas_visuales'])} con tablas o escaneadas"
     if clave == "indices":
         r = e.revision
-        return f"{len(r.capitulos)} capítulos · {len(r.anexos)} anexos · {r.n_clausulas} cláusulas"
+        return (f"{len(r.capitulos)} capítulos · {len(r.anexos)} anexos · {r.n_primer_nivel} cláusulas · "
+                f"{r.n_subniveles} subcláusulas")
     if clave == "seguridad":
         return "Documento limpio" if e.es_seguro else "Alerta de seguridad"
     if clave == "grafo":

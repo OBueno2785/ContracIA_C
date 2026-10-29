@@ -97,17 +97,19 @@ def render_revision_indices_md(rev: dict[str, Any]) -> str:
     md = ["\n## Revisión de Índices"]
     md.append(f"**{_ESTADOS_INDICES.get(rev.get('estado', ''), rev.get('estado', ''))}** — "
               f"{len(rev.get('capitulos', []))} capítulos, {len(rev.get('anexos', []))} anexos, "
-              f"{rev.get('n_clausulas', 0)} cláusulas.")
+              f"{rev.get('n_primer_nivel', 0)} cláusulas de primer nivel y "
+              f"{rev.get('n_subniveles', 0)} subcláusulas ({rev.get('n_clausulas', 0)} en total).")
     if rev.get("normalizado"):
         md.append(f"\nEl formato del contrato se adaptó al estándar ({rev.get('cambios_formato', 0)} cambios en "
                   "encabezados y numeración) para poder reconocer su estructura. Ejemplos:")
         for antes, despues in rev.get("ejemplos_cambios", [])[:8]:
             md.append(f"- `{antes[:90]}` → `{despues[:90]}`")
     if rev.get("capitulos"):
-        md.append("\n| Capítulo | Cláusulas | Faltantes |")
-        md.append("|---|---:|---|")
+        md.append("\n| Capítulo | Cláusulas (1.er nivel) | Subcláusulas | Faltantes |")
+        md.append("|---|---:|---:|---|")
         for c in rev["capitulos"]:
-            md.append(f"| {c['titulo']} | {c['n_clausulas']} | {', '.join(c['faltantes']) or '—'} |")
+            md.append(f"| {c['titulo']} | {c.get('n_primer_nivel', c['n_clausulas'])} | "
+                      f"{c.get('n_subniveles', 0)} | {', '.join(c['faltantes']) or '—'} |")
     if rev.get("problemas"):
         md.append("\n**Observaciones:**")
         md.extend(f"- {p}" for p in rev["problemas"])

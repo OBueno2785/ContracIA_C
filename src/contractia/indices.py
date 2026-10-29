@@ -32,6 +32,8 @@ class ReporteIndices:
     capitulos: list[dict] = field(default_factory=list)
     anexos: list[dict] = field(default_factory=list)
     n_clausulas: int = 0
+    n_primer_nivel: int = 0
+    n_subniveles: int = 0
     problemas: list[str] = field(default_factory=list)
     normalizado: bool = False
     cambios_formato: int = 0
@@ -50,6 +52,11 @@ def _a_int(num: str) -> int:
     if num.isdigit():
         return int(num)
     return _roman_to_int(num)
+
+
+def _es_primer_nivel(cid: str) -> bool:
+    # 3.5 es de primer nivel; 3.5.2 (o 3.5.a) es una subcláusula.
+    return len(cid.split(".")) == 2
 
 
 def _huecos(numeros: list[int]) -> list[int]:
@@ -74,7 +81,11 @@ def revisar_indices(texto: str) -> tuple[list[dict], ReporteIndices]:
         n = _a_int(num)
         ids = _extraer_numeros_clausula(s["contenido"], str(n)) if n else []
         _, faltantes, _ = _validar_secuencia_clausulas(ids, str(n)) if ids else (True, [], 0)
-        caps_info.append({"n": num, "titulo": s["titulo"], "n_clausulas": len(ids), "faltantes": faltantes})
+        primer_nivel = sum(_es_primer_nivel(c) for c in ids)
+        caps_info.append({
+            "n": num, "titulo": s["titulo"], "n_clausulas": len(ids),
+            "n_primer_nivel": primer_nivel, "n_subniveles": len(ids) - primer_nivel, "faltantes": faltantes,
+        })
         if not ids:
             problemas.append(f"{s['titulo']}: sin cláusulas numeradas como {n}.x")
         elif faltantes:
@@ -90,11 +101,15 @@ def revisar_indices(texto: str) -> tuple[list[dict], ReporteIndices]:
     if huecos_anexos:
         problemas.append("Anexos no detectados: " + ", ".join(str(h) for h in huecos_anexos))
 
+    indice_global = crear_indice_global_clausulas(secciones)
+    primer_nivel = sum(_es_primer_nivel(c) for c in indice_global)
     return secciones, ReporteIndices(
         estado=CON_OBSERVACIONES if problemas else OK,
         capitulos=caps_info,
         anexos=anexos_info,
-        n_clausulas=len(crear_indice_global_clausulas(secciones)),
+        n_clausulas=len(indice_global),
+        n_primer_nivel=primer_nivel,
+        n_subniveles=len(indice_global) - primer_nivel,
         problemas=problemas,
     )
 

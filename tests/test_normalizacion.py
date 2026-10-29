@@ -93,6 +93,19 @@ def test_titulo_con_guion_largo_queda_compatible():
     assert "Anexo 1 MODELO DIGITAL (BIM - APP)" in normalizado
 
 
+def test_conteo_por_nivel():
+    texto = ESTANDAR.replace(
+        "1.2. El CONCEDENTE supervisa.\n",
+        "1.2. El CONCEDENTE supervisa.\n1.2.1. Revisa los informes.\n1.2.2. Visita las obras.\n",
+    )
+    _, rep = revisar_indices(texto)
+    cap_i = rep.capitulos[0]
+    assert (cap_i["n_primer_nivel"], cap_i["n_subniveles"], cap_i["n_clausulas"]) == (2, 2, 4)
+    assert (rep.n_primer_nivel, rep.n_subniveles) == (4, 2)
+    md = render_revision_indices_md(rep.to_dict())
+    assert "4 cláusulas de primer nivel y 2 subcláusulas" in md
+
+
 def test_observaciones_por_clausulas_faltantes():
     _, rep = revisar_indices(ESTANDAR.replace("1.2. El CONCEDENTE supervisa.\n", "1.3. El CONCEDENTE supervisa.\n"))
     assert rep.estado == CON_OBSERVACIONES
