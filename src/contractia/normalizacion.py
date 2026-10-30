@@ -138,6 +138,15 @@ def _titulo_desde_siguiente(lineas: list[str], i: int) -> tuple[str, list[int]] 
     return titulo, usadas
 
 
+# La extracción de PDF con texto justificado parte los números: "ANEXO 2 2: REQUISITOS" en vez de "ANEXO 22:".
+_NUMERO_PARTIDO = re.compile(r"^(?P<ini>[ \t]*(?:ANEXOS?|CAP[IÍ]TULO|CL[AÁ]USULA)[ \t]+(?:N[°º][ \t]*)?)"
+                             r"(?P<a>\d)[ \t]+(?P<b>\d)(?P<fin>[ \t]*[:.–—-])", re.IGNORECASE)
+
+
+def _unir_numero_partido(linea: str) -> str:
+    return _NUMERO_PARTIDO.sub(lambda m: f"{m['ini']}{m['a']}{m['b']}{m['fin']}", linea)
+
+
 def _es_encabezado(linea: str) -> bool:
     return bool(_CAP_LINEA.match(linea) or _CLAUSULA_LINEA.match(linea) or _ANEXO_LINEA.match(linea))
 
@@ -317,6 +326,11 @@ def normalizar_formato(texto: str) -> tuple[str, list[tuple[str, str]]]:
     """Devuelve el texto en formato estándar y la lista de cambios (antes, después)."""
     cambios: list[tuple[str, str]] = []
     lineas = texto.replace("\r", "").split("\n")
+    for i, linea in enumerate(lineas):
+        unida = _unir_numero_partido(linea)
+        if unida != linea:
+            cambios.append((linea.strip(), unida.strip()))
+            lineas[i] = unida
 
     n_capitulos, n_clausulas = _contar(lineas, _CAP_LINEA), _contar(lineas, _CLAUSULA_LINEA)
     if n_capitulos >= max(2, n_clausulas):

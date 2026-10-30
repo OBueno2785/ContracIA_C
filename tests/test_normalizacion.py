@@ -142,6 +142,15 @@ def test_anexos_listados_en_indice_pero_no_en_el_cuerpo():
     assert any("no encontrados en el cuerpo: 2" in p for p in rep.problemas)
 
 
+def test_numero_de_anexo_partido_por_la_extraccion():
+    # El texto justificado del PDF extrae "ANEXO 2 2:" en lugar de "ANEXO 22:".
+    texto = ESTANDAR + "\nANEXO 2 2: REQUISITOS DE PRECALIFICACIÓN\n1.1. Texto del anexo.\n"
+    normalizado, _ = normalizar_formato(texto)
+    assert "Anexo 22 REQUISITOS DE PRECALIFICACIÓN" in normalizado
+    _, _, rep, _ = preparar_contrato(texto.replace("Anexo 1 MODELO DE GARANTÍA", "ANEXO 1: MODELO DE GARANTÍA"))
+    assert {a["n"] for a in rep.anexos} == {"1", "22"}
+
+
 def test_estructura_no_reconocida():
     _, _, rep, _ = preparar_contrato("Texto libre sin capítulos ni cláusulas numeradas.\nOtra línea.")
     assert rep.estado == NO_RECONOCIDO

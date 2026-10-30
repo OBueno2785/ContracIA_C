@@ -161,9 +161,7 @@ def _elegir_formato(texto: str) -> tuple[str, list[dict], ReporteIndices, list[t
         "  Formato original: %s — %d capítulos, %d anexos, %d cláusulas, %d observaciones.",
         reporte.estado, len(reporte.capitulos), len(reporte.anexos), reporte.n_clausulas, len(reporte.problemas),
     )
-    if reporte.estado == OK:
-        return texto, secciones, reporte, []
-
+    # Se prueba siempre: un contrato con capítulos estándar puede tener anexos en otro formato.
     texto_norm, cambios = normalizar_formato(texto)
     if not cambios:
         log.info("  No hay encabezados que adaptar al formato estándar.")
