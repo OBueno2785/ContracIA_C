@@ -83,7 +83,7 @@ def _sin_errores(at):
 
 _ICONO_A_ESTADO = {
     ":green[:material/check_circle:]": "hecha",
-    ":blue[:material/radio_button_checked:]": "actual",
+    ":orange[:material/radio_button_checked:]": "actual",
     ":gray[:material/radio_button_unchecked:]": "pendiente",
     ":red[:material/block:]": "bloqueada",
 }

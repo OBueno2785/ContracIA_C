@@ -11,43 +11,61 @@ toolbarMode = "minimal"
 gatherUsageStats = false
 serverAddress = "localhost"
 
-# Tema "legal-financiero": azul marino sobre blanco, barra lateral gris, IBM Plex.
+# Tema oscuro cálido: negro cálido, tarjetas granate oscuro y acento cobre.
+# El primario es cobre profundo (#C2410C) para que el texto blanco de los botones
+# tenga contraste suficiente; el naranja claro (#F7A86B) se usa en textos y badges.
 [theme]
-base = "light"
-primaryColor = "#1F3A5F"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F5F7FA"
-textColor = "#0F1B2D"
-borderColor = "#E4E7EC"
-linkColor = "#1F3A5F"
-codeBackgroundColor = "#F2F4F7"
-font = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
-headingFont = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@600;700&display=swap"
+base = "dark"
+primaryColor = "#C2410C"
+backgroundColor = "#0D0A08"
+secondaryBackgroundColor = "#1A120E"
+textColor = "#F5EDE6"
+borderColor = "#2E231D"
+linkColor = "#F7A86B"
+codeBackgroundColor = "#1F1612"
+codeTextColor = "#F7A86B"
+font = "Manrope:https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap"
+headingFont = "'Cormorant Garamond':https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&display=swap"
 codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
 baseFontSize = 15
-headingFontSizes = ["30px", "22px", "17px", "15px", "14px", "13px"]
-headingFontWeights = [700, 700, 600, 600, 600, 600]
-metricValueFontSize = "1.75rem"
+headingFontSizes = ["42px", "30px", "24px", "18px", "15px", "13px"]
+headingFontWeights = [600, 600, 600, 600, 600, 600]
+metricValueFontSize = "1.85rem"
 metricValueFontWeight = 600
-baseRadius = "10px"
-buttonRadius = "8px"
+baseRadius = "14px"
+buttonRadius = "full"
 showWidgetBorder = true
 showSidebarBorder = true
 linkUnderline = false
-greenColor = "#067647"
-orangeColor = "#B54708"
-redColor = "#B42318"
-blueColor = "#1F3A5F"
-grayColor = "#667085"
-dataframeHeaderBackgroundColor = "#F9FAFB"
-dataframeBorderColor = "#EAECF0"
-chartCategoricalColors = ["#1F3A5F", "#0E7090", "#B54708", "#067647", "#6941C6", "#B42318", "#667085"]
+orangeColor = "#F26A1B"
+orangeTextColor = "#F7A86B"
+orangeBackgroundColor = "#2A1810"
+yellowColor = "#F5A524"
+yellowTextColor = "#FCD089"
+yellowBackgroundColor = "#2E2210"
+greenColor = "#32D583"
+greenTextColor = "#6CE9A6"
+greenBackgroundColor = "#13281C"
+redColor = "#F97066"
+redTextColor = "#FF9C8A"
+redBackgroundColor = "#3A1712"
+blueColor = "#F26A1B"
+blueTextColor = "#F7A86B"
+blueBackgroundColor = "#2A1810"
+grayColor = "#A8988C"
+grayTextColor = "#B8A99E"
+grayBackgroundColor = "#241914"
+dataframeHeaderBackgroundColor = "#15100D"
+dataframeHeaderTextColor = "#B8A99E"
+dataframeBorderColor = "#2A201B"
+chartCategoricalColors = ["#F26A1B", "#F5A524", "#F7A86B", "#C2410C", "#FCD089", "#A8988C", "#6CE9A6"]
 paddingTop = "1.5rem"
 
 [theme.sidebar]
-backgroundColor = "#F5F7FA"
-secondaryBackgroundColor = "#FFFFFF"
-textColor = "#0F1B2D"
-borderColor = "#E4E7EC"
-primaryColor = "#1F3A5F"
-linkColor = "#1F3A5F"
+backgroundColor = "#15100D"
+secondaryBackgroundColor = "#1F1612"
+codeBackgroundColor = "#1F1612"
+textColor = "#F5EDE6"
+borderColor = "#2A201B"
+primaryColor = "#C2410C"
+linkColor = "#F7A86B"

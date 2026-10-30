@@ -47,7 +47,7 @@ ETAPAS = [
 ESTADO_VISUAL = {
     # icono del paso, color del texto, badge
     "hecha": (":green[:material/check_circle:]", "", ("Completada", ":material/check:", "green")),
-    "actual": (":blue[:material/radio_button_checked:]", "", ("Siguiente paso", ":material/arrow_forward:", "blue")),
+    "actual": (":orange[:material/radio_button_checked:]", "", ("Siguiente paso", ":material/arrow_forward:", "orange")),
     "pendiente": (":gray[:material/radio_button_unchecked:]", "gray", ("Pendiente", ":material/schedule:", "gray")),
     "bloqueada": (":red[:material/block:]", "gray", ("Bloqueada", ":material/block:", "red")),
 }
@@ -375,23 +375,37 @@ def _resumen_etapa(clave: str) -> str:
 
 
 # ---------------------------------------------------------------- página
+def _etiqueta_costo_corta(clave: str) -> str:
+    texto = _costo_etapa(clave)
+    return "gratis" if texto == "Sin costo" else texto.replace("Usa el modelo · ", "").replace("Usa el modelo", "modelo")
+
+
 def _barra_lateral() -> None:
     with st.sidebar:
+        st.markdown("## :orange[:material/balance:] ContractIA")
+        st.caption("Auditoría contractual con agentes y Claude")
+
         hechas = len(st.session_state.hechas)
-        st.subheader("Progreso")
         st.progress(hechas / len(ETAPAS), text=f"{hechas} de {len(ETAPAS)} etapas completadas")
-        for i, (clave, nombre, _, usa_modelo, _) in enumerate(ETAPAS):
+        for i, (clave, nombre, _, _, _) in enumerate(ETAPAS):
             est = _estado_etapa(i)
             icono, color, _ = ESTADO_VISUAL[est]
-            texto = f"**{i + 1}. {nombre}**" if est == "actual" else f"{i + 1}. {nombre}"
+            texto = f"**{nombre}**" if est == "actual" else nombre
             if color:
                 texto = f":{color}[{texto}]"
-            st.markdown(f"{icono} {texto}  \n:gray[{'usa el modelo' if usa_modelo else 'sin costo'}]")
+            with st.container(horizontal=True, horizontal_alignment="distribute", vertical_alignment="center", gap="small"):
+                st.markdown(f"{icono} {texto}")
+                st.caption(_etiqueta_costo_corta(clave), width="content")
 
         c = st.session_state.carga
         if c:
             with st.container(border=True):
-                st.markdown(":material/picture_as_pdf: **Contrato**")
+                st.caption(":orange[:material/payments:] **Costo estimado**")
+                total = _costo_total_estimado()
+                st.markdown(f"### \\${total * 0.7:,.0f} – \\${total * 1.4:,.0f}")
+                st.caption(f"Auditoría completa con {CFG.modelo}. La revisión de índices no tiene costo.")
+            with st.container(border=True):
+                st.markdown(":orange[:material/picture_as_pdf:] **Contrato**")
                 st.caption(" · ".join(c["archivos"]))
                 cols = st.columns(2)
                 cols[0].metric("Páginas", _miles(c["paginas"]))
@@ -421,8 +435,12 @@ def _barra_lateral() -> None:
 def _encabezado() -> None:
     with st.container(horizontal=True, vertical_alignment="center"):
         with st.container():
-            st.title("ContractIA", icon=":material/balance:")
-            st.caption("Auditoría de contratos con agentes especializados, grafo de conocimiento y Claude.")
+            if st.session_state.carga:
+                st.title("Auditoría del contrato")
+                st.caption(" · ".join(st.session_state.carga["archivos"]))
+            else:
+                st.title("Cargar contrato")
+                st.caption("Sube el contrato y ContractIA revisará su estructura antes de llamar al modelo.")
         with st.container(horizontal=True, horizontal_alignment="right", vertical_alignment="center"):
             if _hay_credenciales():
                 st.badge("API key conectada", icon=":material/check_circle:", color="green")
@@ -458,23 +476,94 @@ def _cabecera_etapa(i: int, est: str) -> None:
     clave, nombre, descripcion, _, icono = ETAPAS[i]
     etiqueta, icono_badge, color = ESTADO_VISUAL[est][2]
     with st.container(horizontal=True, vertical_alignment="center"):
-        st.markdown(f"#### {icono} {i + 1} · {nombre}")
+        st.markdown(f"### {icono} {i + 1} · {nombre}")
         st.badge(etiqueta, icon=icono_badge, color=color)
     st.caption(_resumen_etapa(clave) if est == "hecha" else descripcion)
 
 
+QUE_OBTENDRAS = [
+    ("Revisión de índices", "Capítulos, cláusulas y anexos detectados; adapta formatos distintos al estándar."),
+    ("Escaneo de seguridad", "Detecta instrucciones ocultas dirigidas a la IA antes de analizar."),
+    ("Auditoría por agentes", "Jurista, auditor y cronista revisan cada sección con el contrato como referencia."),
+    ("Síntesis global", "Contradicciones entre capítulos, ausencias y posibles falsos positivos."),
+    ("Chat con el contrato", "Preguntas respondidas solo con las partes del contrato relacionadas."),
+]
+SEGURIDAD = [
+    ("Solo en tu equipo", "La interfaz escucha únicamente en localhost."),
+    ("Escaneo previo", "Si detecta instrucciones ocultas, la auditoría se detiene."),
+    ("Clave protegida", "La API key vive en tu archivo .env y no se sube a git."),
+]
+
+
+def _contratos_recientes(limite: int = 5) -> list[dict]:
+    """Contratos subidos antes desde esta interfaz (carpetas en cache/subidos)."""
+    base = os.path.join(CFG.cache_dir, "subidos")
+    if not os.path.isdir(base):
+        return []
+    filas = []
+    for nombre in os.listdir(base):
+        carpeta = os.path.join(base, nombre)
+        archivos = [f for f in sorted(os.listdir(carpeta)) if f.lower().endswith((".pdf", ".docx"))] if os.path.isdir(carpeta) else []
+        if archivos:
+            rutas = [os.path.join(carpeta, f) for f in archivos]
+            filas.append({
+                "carpeta": carpeta, "archivos": archivos,
+                "mb": sum(os.path.getsize(r) for r in rutas) / 1e6,
+                "fecha": max(os.path.getmtime(r) for r in rutas),
+            })
+    return sorted(filas, key=lambda f: -f["fecha"])[:limite]
+
+
+def _pantalla_inicio() -> None:
+    izq, der = st.columns([2, 1], gap="medium")
+    with izq, st.container(border=True, height="stretch"):
+        st.markdown("### :orange[:material/upload_file:] Arrastra el contrato aquí")
+        _paso_carga()
+    with der, st.container(border=True, height="stretch"):
+        st.markdown("### Qué obtendrás")
+        for n, (titulo, texto) in enumerate(QUE_OBTENDRAS, 1):
+            with st.container(horizontal=True, vertical_alignment="top", gap="small"):
+                st.badge(str(n), color="orange")
+                with st.container(gap="xxsmall"):
+                    st.markdown(f"**{titulo}**")
+                    st.caption(texto)
+        st.caption(":orange[:material/info:] ContractIA no evalúa la validez legal frente a normas externas: "
+                   "revisa la coherencia interna del contrato.")
+
+    izq, der = st.columns([2, 1], gap="medium")
+    with izq, st.container(border=True, height="stretch"):
+        st.markdown("### Contratos recientes")
+        recientes = _contratos_recientes()
+        if not recientes:
+            st.caption("Aún no has subido contratos desde esta interfaz.")
+        for r in recientes:
+            with st.container(horizontal=True, horizontal_alignment="distribute", vertical_alignment="center"):
+                with st.container(gap="xxsmall"):
+                    st.markdown(f":orange[:material/description:] **{' · '.join(r['archivos'])}**")
+                    st.caption(f"{r['mb']:.1f} MB · subido el {time.strftime('%d/%m/%Y %H:%M', time.localtime(r['fecha']))}")
+                if st.button("Continuar", key=f"reciente_{os.path.basename(r['carpeta'])}", icon=":material/arrow_forward:"):
+                    try:
+                        with st.spinner("Leyendo el contrato y detectando páginas con tablas..."):
+                            _correr_carga(r["carpeta"], usar_cache=True)
+                        st.session_state.hechas.add("carga")
+                        st.rerun()
+                    except Exception as e:  # noqa: BLE001
+                        st.error(str(e), title="No se pudo cargar el contrato", icon=":material/error:")
+    with der, st.container(border=True, height="stretch"):
+        st.markdown("### :orange[:material/shield:] Seguridad")
+        for titulo, texto in SEGURIDAD:
+            with st.container(gap="xxsmall"):
+                st.markdown(f"**{titulo}**")
+                st.caption(texto)
+
+
 def _pestana_auditoria() -> None:
+    if not st.session_state.carga:
+        _pantalla_inicio()
+        return
+
     hechas = [i for i in range(len(ETAPAS)) if _estado_etapa(i) == "hecha"]
     ultima_hecha = hechas[-1] if hechas else None
-
-    if st.session_state.carga:
-        with st.container(horizontal=True, vertical_alignment="bottom"):
-            with st.container():
-                st.caption("Auditoría en curso")
-                st.subheader(" · ".join(st.session_state.carga["archivos"]))
-            total = _costo_total_estimado()
-            st.metric("Costo estimado de la auditoría completa", f"\\${total * 0.7:,.0f} – \\${total * 1.4:,.0f}",
-                      border=True, width="content", help="Estimación con Opus 5.5 a partir del tamaño del contrato.")
 
     pendientes_vistos = False
     for i, (clave, _, _, _, _) in enumerate(ETAPAS):
