@@ -228,6 +228,91 @@ def _numeracion_relativa(texto: str, cambios: list[tuple[str, str]]) -> str:
     return "".join(partes)
 
 
+# --- Tabla de contenidos / listados de anexos al inicio del contrato ---
+MARCA_INDICE = "(índice) "
+_INICIO_ENCABEZADO = re.compile(r"^[ \t]*(?:CAP[IÍ]TULO|ANEXOS?|CL[AÁ]USULA|T[IÍ]TULO|SECCI[OÓ]N|AP[EÉ]NDICE)\b", re.IGNORECASE)
+_TERMINA_EN_PAGINA = re.compile(r"\S[ \t]+\d{1,4}[ \t]*$")
+_NUMERACION_PAGINA = re.compile(r"^p[aá]g(?:ina|\.)?[ \t]*\d+(?:[ \t]*(?:de|/)[ \t]*\d+)?$", re.IGNORECASE)
+_MIN_LINEAS_ZONA = 4      # entradas seguidas para considerar un bloque como índice
+_MAX_TEXTO_ENTRE = 2      # líneas de texto toleradas entre dos entradas (títulos partidos)
+_FRACCION_INICIO = 0.2    # la tabla de contenidos y los listados de anexos están al inicio del documento
+
+
+def _es_entrada_indice(linea: str) -> bool:
+    s = linea.strip()
+    if not s or len(s) > 160 or _NUMERACION_PAGINA.match(s):
+        return False
+    if _es_linea_de_indice(linea) or _INICIO_ENCABEZADO.match(linea):
+        return True
+    return bool(_TERMINA_EN_PAGINA.search(s)) and s[0].isupper()
+
+
+_LINEA_CLAUSULA = re.compile(r"^[ \t]*\d+(?:\.\d+)+\.?[ \t]+\S")
+
+
+def _abre_contenido(lineas: list[str], i: int, ventana: int = 4) -> bool:
+    """Un encabezado del cuerpo va seguido (antes del siguiente encabezado) de una cláusula o un párrafo."""
+    vistas = 0
+    for linea in lineas[i + 1:]:
+        s = linea.strip()
+        if not s or _NUMERACION_PAGINA.match(s):
+            continue
+        if _INICIO_ENCABEZADO.match(linea) or _es_linea_de_indice(linea) or _TERMINA_EN_PAGINA.search(s):
+            return False
+        if _LINEA_CLAUSULA.match(linea) or len(s) > 80:
+            return True
+        vistas += 1
+        if vistas >= ventana:
+            return False
+    return False
+
+
+def marcar_indices(texto: str) -> tuple[str, list[tuple[str, str]], int]:
+    """Neutraliza la tabla de contenidos y los listados de capítulos/anexos para que la estructura
+    se detecte solo en el cuerpo del contrato.
+
+    Un bloque es índice cuando tiene al menos 4 entradas seguidas (encabezados o líneas que terminan
+    en número de página) sin texto corrido entre ellas; en el cuerpo, cada encabezado va seguido de su
+    contenido. Las líneas de encabezado del bloque se prefijan con MARCA_INDICE.
+
+    Devuelve (texto, entradas listadas [(tipo, número)], líneas marcadas).
+    """
+    lineas = texto.replace("\r", "").split("\n")
+    limite = max(200, int(len(lineas) * _FRACCION_INICIO))
+    candidatas = [i for i, linea in enumerate(lineas)
+                  if _es_entrada_indice(linea) and not _abre_contenido(lineas, i)]
+    zonas: list[tuple[int, int]] = []
+    tramo: list[int] = []
+    for i in candidatas:
+        if tramo:
+            texto_entre = sum(1 for j in range(tramo[-1] + 1, i) if lineas[j].strip())
+            if texto_entre > _MAX_TEXTO_ENTRE:
+                if len(tramo) >= _MIN_LINEAS_ZONA:
+                    zonas.append((tramo[0], tramo[-1]))
+                tramo = []
+        tramo.append(i)
+    if len(tramo) >= _MIN_LINEAS_ZONA:
+        zonas.append((tramo[0], tramo[-1]))
+
+    entradas: list[tuple[str, str]] = []
+    marcadas = 0
+    for inicio, fin in zonas:
+        if inicio > limite:  # en el cuerpo, p. ej. anexos casi vacíos (solo título y páginas escaneadas)
+            continue
+        encabezados = [j for j in range(inicio, fin + 1) if _INICIO_ENCABEZADO.match(lineas[j])]
+        if len(encabezados) < 2:  # un bloque de cifras sin encabezados es una tabla del cuerpo
+            continue
+        for j in encabezados:
+            m_cap, m_anx = _CAP_LINEA.match(lineas[j]), _ANEXO_LINEA.match(lineas[j])
+            if m_cap and (n := _numero(m_cap.group("num"))):
+                entradas.append(("CAPITULO", str(n)))
+            elif m_anx and (n := _numero_anexo(m_anx.group("num"))):
+                entradas.append(("ANEXO", n))
+            lineas[j] = MARCA_INDICE + lineas[j].lstrip()
+            marcadas += 1
+    return "\n".join(lineas), entradas, marcadas
+
+
 def normalizar_formato(texto: str) -> tuple[str, list[tuple[str, str]]]:
     """Devuelve el texto en formato estándar y la lista de cambios (antes, después)."""
     cambios: list[tuple[str, str]] = []

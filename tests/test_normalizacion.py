@@ -112,6 +112,36 @@ def test_observaciones_por_clausulas_faltantes():
     assert any("1.2" in p for p in rep.problemas)
 
 
+TABLA_DE_CONTENIDOS = """ÍNDICE
+Capítulo I: DISPOSICIONES GENERALES 3
+Antecedentes 3
+Capítulo II: PLAZOS Y GARANTÍAS 5
+Anexos del contrato
+Anexo 1 Modelo de garantía
+Anexo 2 Cuadro de penalidades
+
+"""
+CUERPO_CON_DOS_PUNTOS = (ESTANDAR.replace("Capítulo I DISPOSICIONES GENERALES", "Capítulo I: DISPOSICIONES GENERALES")
+                         .replace("Capítulo II PLAZOS Y GARANTÍAS", "Capítulo II: PLAZOS Y GARANTÍAS"))
+
+
+def test_tabla_de_contenidos_sin_puntos_guia_se_ignora():
+    texto, secciones, rep, cambios = preparar_contrato(TABLA_DE_CONTENIDOS + CUERPO_CON_DOS_PUNTOS)
+    # Solo se adaptan los encabezados del cuerpo, nunca las entradas del índice (que terminan en número de página).
+    assert [d for _, d in cambios if d.startswith("Capítulo")] == [
+        "Capítulo I DISPOSICIONES GENERALES", "Capítulo II PLAZOS Y GARANTÍAS"]
+    assert rep.lineas_indice >= 4
+    capitulos = [s for s in secciones if s["tipo"] == "CAPITULO"]
+    assert all("1.1." in s["contenido"] or "2.1." in s["contenido"] for s in capitulos)
+    assert "(índice) Capítulo I: DISPOSICIONES GENERALES 3" in texto
+
+
+def test_anexos_listados_en_indice_pero_no_en_el_cuerpo():
+    _, _, rep, _ = preparar_contrato(TABLA_DE_CONTENIDOS + CUERPO_CON_DOS_PUNTOS)
+    assert [a["n"] for a in rep.anexos] == ["1"]  # solo el Anexo 1 del cuerpo, no los del listado
+    assert any("no encontrados en el cuerpo: 2" in p for p in rep.problemas)
+
+
 def test_estructura_no_reconocida():
     _, _, rep, _ = preparar_contrato("Texto libre sin capítulos ni cláusulas numeradas.\nOtra línea.")
     assert rep.estado == NO_RECONOCIDO

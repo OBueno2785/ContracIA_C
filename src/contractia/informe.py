@@ -99,6 +99,9 @@ def render_revision_indices_md(rev: dict[str, Any]) -> str:
               f"{len(rev.get('capitulos', []))} capítulos, {len(rev.get('anexos', []))} anexos, "
               f"{rev.get('n_primer_nivel', 0)} cláusulas de primer nivel y "
               f"{rev.get('n_subniveles', 0)} subcláusulas ({rev.get('n_clausulas', 0)} en total).")
+    if rev.get("lineas_indice"):
+        md.append(f"\nSe ignoraron {rev['lineas_indice']} líneas de la tabla de contenidos: la estructura se "
+                  "detectó solo en el cuerpo del contrato.")
     if rev.get("normalizado"):
         md.append(f"\nEl formato del contrato se adaptó al estándar ({rev.get('cambios_formato', 0)} cambios en "
                   "encabezados y numeración) para poder reconocer su estructura. Ejemplos:")

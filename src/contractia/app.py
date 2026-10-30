@@ -232,6 +232,9 @@ def _vista_indices() -> None:
                    help="Primer nivel: 1.1, 3.5… (número del capítulo y un número más).")
     cols[3].metric("Subcláusulas", rev.n_subniveles, border=True,
                    help="Segundo nivel o más: 1.1.2, 2.1.4…")
+    if getattr(rev, "lineas_indice", 0):
+        st.caption(f":material/toc: Se ignoraron {rev.lineas_indice} líneas de la tabla de contenidos: la estructura "
+                   "se detecta solo en el cuerpo del contrato.")
     if rev.normalizado:
         st.info(f"El formato se adaptó al estándar ({rev.cambios_formato} cambios en encabezados y numeración).",
                 icon=":material/auto_fix_high:")

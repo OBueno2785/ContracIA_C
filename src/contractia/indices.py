@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 from .logging_setup import get_logger
-from .normalizacion import normalizar_formato
+from .normalizacion import marcar_indices, normalizar_formato
 from .segmentacion import (
     _extraer_num_anexo,
     _extraer_num_cap,
@@ -37,6 +37,8 @@ class ReporteIndices:
     problemas: list[str] = field(default_factory=list)
     normalizado: bool = False
     cambios_formato: int = 0
+    lineas_indice: int = 0
+    entradas_indice: int = 0
     ejemplos_cambios: list[tuple[str, str]] = field(default_factory=list)
 
     def puntaje(self) -> int:
@@ -114,12 +116,46 @@ def revisar_indices(texto: str) -> tuple[list[dict], ReporteIndices]:
     )
 
 
+def _contrastar_con_indice(reporte: ReporteIndices, entradas: list[tuple[str, str]]) -> None:
+    """Agrega como observación lo que el índice lista y no aparece en el cuerpo."""
+    if reporte.estado == NO_RECONOCIDO or not entradas:
+        return
+    caps_cuerpo = {_a_int(c["n"]) for c in reporte.capitulos}
+    anexos_cuerpo = {a["n"].upper() for a in reporte.anexos}
+    faltan_caps = sorted({int(n) for t, n in entradas if t == "CAPITULO"} - caps_cuerpo)
+    faltan_anexos = sorted({n for t, n in entradas if t == "ANEXO"} - anexos_cuerpo,
+                           key=lambda x: (not x.isdigit(), int(x) if x.isdigit() else 0, x))
+    if faltan_caps:
+        reporte.problemas.append("Capítulos listados en el índice pero no encontrados en el cuerpo: "
+                                 + ", ".join(str(n) for n in faltan_caps))
+    if faltan_anexos:
+        reporte.problemas.append("Anexos listados en el índice pero no encontrados en el cuerpo: "
+                                 + ", ".join(faltan_anexos))
+    if reporte.problemas and reporte.estado == OK:
+        reporte.estado = CON_OBSERVACIONES
+
+
 def preparar_contrato(texto: str) -> tuple[str, list[dict], ReporteIndices, list[tuple[str, str]]]:
     """Revisa los índices y, si hay problemas, prueba el texto normalizado.
 
+    La tabla de contenidos y los listados de anexos se neutralizan antes, para que capítulos,
+    cláusulas y anexos se detecten solo en el cuerpo del contrato.
     Devuelve (texto usado, secciones, reporte, cambios de formato aplicados).
     """
     log.info("FASE 0: Revisión de índices (capítulos, cláusulas y anexos)...")
+    texto, entradas_indice, lineas_indice = marcar_indices(texto)
+    if lineas_indice:
+        log.info("  Tabla de contenidos: %d líneas ignoradas (%d capítulos/anexos listados).",
+                 lineas_indice, len(entradas_indice))
+
+    texto_usado, secciones, reporte, cambios = _elegir_formato(texto)
+    reporte.lineas_indice = lineas_indice
+    reporte.entradas_indice = len(entradas_indice)
+    _contrastar_con_indice(reporte, entradas_indice)
+    return texto_usado, secciones, reporte, cambios
+
+
+def _elegir_formato(texto: str) -> tuple[str, list[dict], ReporteIndices, list[tuple[str, str]]]:
     secciones, reporte = revisar_indices(texto)
     log.info(
         "  Formato original: %s — %d capítulos, %d anexos, %d cláusulas, %d observaciones.",
